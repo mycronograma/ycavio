@@ -217,11 +217,11 @@ export const ScheduleView: React.FC = () => {
                       </div>
                     ) : (
                       <div className="space-y-2.5">
-                        {dayTasks.map((t) => {
+                        {dayTasks.map((t, tIdx) => {
                           const isDone = t.status === 'concluida';
                           return (
                             <div
-                              key={t.id}
+                              key={`${t.id}-${tIdx}`}
                               className={`rounded-xl border p-3 transition ${
                                 isDone
                                   ? 'border-stone-200 bg-stone-50/60 opacity-75 dark:border-stone-800 dark:bg-stone-800/40'
@@ -310,7 +310,7 @@ export const ScheduleView: React.FC = () => {
                 const isDone = t.status === 'concluida';
                 return (
                   <div
-                    key={t.id}
+                    key={`${t.id}-${idx}`}
                     className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border p-4 ${
                       isDone
                         ? 'border-stone-200 bg-stone-50/60 opacity-80 dark:border-stone-800 dark:bg-stone-800/40'

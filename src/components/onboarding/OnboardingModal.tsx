@@ -34,6 +34,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
   const [targetExam, setTargetExam] = useState('ENEM 2026');
   const [hasExamDate, setHasExamDate] = useState(true);
   const [examDate, setExamDate] = useState(addDays(getTodayStr(), 120));
+  const [targetTotalHours, setTargetTotalHours] = useState(200);
 
   // Step 2: Time & Availability
   const [dailyMinutes, setDailyMinutes] = useState(120); // 2 hours
@@ -158,6 +159,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
         objective: targetExam || currentPreset.name,
         targetExam: targetExam || currentPreset.name,
         examDate: hasExamDate ? examDate : undefined,
+        targetTotalHours: !hasExamDate ? targetTotalHours : undefined,
         profileType,
         dailyAvailableMinutes: dailyMinutes,
         availableDays: selectedDays,
@@ -269,9 +271,9 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider">
-                    Data da Prova
+                    {hasExamDate ? 'Data da Prova' : 'Meta de Horas Totais'}
                   </label>
-                  <label className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400 cursor-pointer">
+                  <label className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400 cursor-pointer font-medium">
                     <input
                       type="checkbox"
                       checked={hasExamDate}
@@ -281,13 +283,35 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({ isOpen, onClos
                     Tenho data
                   </label>
                 </div>
-                <input
-                  type="date"
-                  disabled={!hasExamDate}
-                  value={examDate}
-                  onChange={(e) => setExamDate(e.target.value)}
-                  className="w-full rounded-xl border border-stone-300 dark:border-stone-600 px-4 py-2.5 text-sm text-stone-900 dark:text-stone-100 outline-hidden focus:border-indigo-600 disabled:bg-stone-100 disabled:text-stone-400"
-                />
+                {hasExamDate ? (
+                  <input
+                    type="date"
+                    value={examDate}
+                    onChange={(e) => setExamDate(e.target.value)}
+                    className="w-full rounded-xl border border-stone-300 dark:border-stone-600 px-4 py-2.5 text-sm text-stone-900 dark:text-stone-100 outline-hidden focus:border-indigo-600"
+                  />
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="10"
+                      max="5000"
+                      step="10"
+                      value={targetTotalHours}
+                      onChange={(e) => setTargetTotalHours(Math.max(1, Number(e.target.value)))}
+                      placeholder="Ex: 200"
+                      className="w-full rounded-xl border border-stone-300 dark:border-stone-600 px-4 py-2.5 text-sm text-stone-900 dark:text-stone-100 outline-hidden focus:border-indigo-600 font-bold"
+                    />
+                    <span className="text-xs font-bold text-stone-500 dark:text-stone-400 shrink-0">
+                      horas no total
+                    </span>
+                  </div>
+                )}
+                {!hasExamDate && (
+                  <span className="text-[11px] text-stone-400 dark:text-stone-500 mt-1 block">
+                    💡 Você define a quantidade de horas que deseja cumprir no ciclo.
+                  </span>
+                )}
               </div>
             </div>
           </div>

@@ -9,9 +9,11 @@ export type StudyProfileType =
   | 'sem_cronograma';
 
 export type SubjectDifficulty = 'baixa' | 'media' | 'alta';
+
 export type KnowledgeLevel = 'iniciante' | 'intermediario' | 'avancado';
 
 export type TaskType = 'teoria' | 'exercicios' | 'revisao' | 'simulado';
+
 export type TaskStatus = 'pendente' | 'em_andamento' | 'concluida' | 'atrasada' | 'pulada';
 
 export interface SubjectTopic {
@@ -23,13 +25,16 @@ export interface SubjectTopic {
   exercisesCorrect?: number;
 }
 
+/**
+ * Subject Model enriched with spreadsheet fields (MATÉRIAS, PESO, CICLO, REVISÃO, CADERNO DE QUESTÕES, PAREI, MAT. CONCLUÍDA)
+ */
 export interface Subject {
   id: string;
   name: string;
   color: string; // Tailwind color class or hex
   iconName?: string;
   weight: number; // 1 to 5 (importance in target exam)
-  difficulty: SubjectDifficulty; // baixa (1), media (1.5), alta (2)
+  difficulty: SubjectDifficulty; // baixa, media, alta
   knowledgeLevel: KnowledgeLevel; // iniciante, intermediario, avancado
   topics: SubjectTopic[];
   totalMinutesStudied: number;
@@ -38,6 +43,13 @@ export interface Subject {
   completedTasksCount: number;
   totalExercisesDone: number;
   totalExercisesCorrect: number;
+
+  // Campos específicos da Planilha de Estudos:
+  ciclo: number; // Contador do ciclo atual
+  revisaoNotes?: string; // Coluna "REVISÃO" (ex: "ortografia", "resumo const 1.1-1.2")
+  cadernoQuestoes?: string; // Coluna "CADERNO DE QUESTÕES" (ex: "questão 40 - ortográfica", "questão 01")
+  pareiEm?: string; // Coluna "PAREI" (ex: "aula 1.6 - morfologia", "aula 1.3")
+  concluida?: boolean; // Coluna "MAT. CONCLUÍDA" (checkbox)
 }
 
 export interface Task {
@@ -60,6 +72,11 @@ export interface Task {
   completedAt?: string;
   isSpacedReview?: boolean;
   reviewStep?: number; // 1 (D+1), 2 (D+7), 3 (D+15), 4 (D+30)
+  
+  // Rastreamento de onde parou e caderno de questões na tarefa
+  pareiEm?: string;
+  cadernoQuestoes?: string;
+  revisaoNotes?: string;
 }
 
 export interface SpacedReview {
@@ -82,12 +99,14 @@ export interface StudySession {
   subjectName: string;
   topicName: string;
   type: TaskType;
-  durationMinutes: number;
+  durationMinutes: number; // minutes
   date: string; // ISO or YYYY-MM-DD
   exercisesDone: number;
   exercisesCorrect: number;
   xpEarned: number;
   notes?: string;
+  pareiEm?: string;
+  cadernoQuestoes?: string;
 }
 
 export interface Achievement {
@@ -114,21 +133,25 @@ export interface UserProfile {
   name: string;
   email?: string;
   avatarSeed?: string;
-  objective: string; // e.g. "ENEM Medicina", "Receita Federal", "Aprender Programação"
+  objective: string; // e.g. "ENEM Medicina", "Receita Federal", "Concurso Público"
   targetExam?: string;
   examDate?: string; // YYYY-MM-DD
+  targetTotalHours?: number; // Total hours goal when user has no fixed exam date
   profileType: StudyProfileType;
   dailyAvailableMinutes: number; // e.g. 120 (2h)
   availableDays: number[]; // 0=Sun, 1=Mon, ..., 6=Sat
   preferredSessionLength: number; // 25, 45, 50, 60 min
-  
+
   // Gamification stats
   xp: number;
   level: number;
   streakDays: number;
   lastActiveDate?: string; // YYYY-MM-DD
   freezeStreakCount: number;
-  
+
+  // Global cycle counter for spreadsheet cycle logic
+  globalCiclo?: number;
+
   // Onboarding state
   onboardingCompleted: boolean;
   createdAt: string;

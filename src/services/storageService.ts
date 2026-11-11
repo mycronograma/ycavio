@@ -321,7 +321,12 @@ export function createDefaultState(): AppState {
     createdAt: todayStr,
   };
 
-  const subjects: Subject[] = defaultPreset.subjects.map((s, idx) => ({
+  const subjects: Subject[] = defaultPreset.subjects.map((s: any, idx) => ({
+    ciclo: s.ciclo ?? 0,
+    revisaoNotes: s.revisaoNotes ?? '',
+    cadernoQuestoes: s.cadernoQuestoes ?? '',
+    pareiEm: s.pareiEm ?? '',
+    concluida: s.concluida ?? false,
     id: `sub-${idx + 1}`,
     name: s.name,
     color: s.color,
@@ -413,7 +418,29 @@ export function loadStoredState(): AppState {
       return defaultState;
     }
     const parsed = JSON.parse(raw) as AppState;
+    if (parsed && Array.isArray(parsed.tasks)) {
+      // Clean up any duplicate task IDs that may have been saved to localStorage
+      const seenIds = new Set<string>();
+      parsed.tasks = parsed.tasks.map((task, idx) => {
+        if (seenIds.has(task.id)) {
+          const uniqueId = `${task.id}-dup-${idx}-${Math.random().toString(36).slice(2, 6)}`;
+          return { ...task, id: uniqueId };
+        }
+        seenIds.add(task.id);
+        return task;
+      });
+    }
     // Basic schema check
+    if (parsed && Array.isArray(parsed.subjects)) {
+      parsed.subjects = parsed.subjects.map((sub: any) => ({
+        ...sub,
+        ciclo: sub.ciclo !== undefined ? sub.ciclo : 0,
+        revisaoNotes: sub.revisaoNotes || '',
+        cadernoQuestoes: sub.cadernoQuestoes || '',
+        pareiEm: sub.pareiEm || '',
+        concluida: !!sub.concluida,
+      }));
+    }
     if (!parsed.profile || !parsed.subjects || !parsed.tasks) {
       const fallback = createDefaultState();
       saveStoredState(fallback);

@@ -17,7 +17,7 @@ interface NavbarProps {
   onOpenAchievements: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onOpenAchievements }) => {
+export const Navbar: React.FC<NavbarProps> = ({ onOpenAchievements, onOpenOnboarding }) => {
   const { state, recalculateSchedule } = useStudy();
   const { profile, tasks, dailyGoal } = state;
 
@@ -134,6 +134,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenAchievements }) => {
             <span className="hidden lg:inline">Recalcular</span>
           </button>
 
+          {/* Change Preset / Reconfig Button */}
+          <button
+            onClick={onOpenOnboarding}
+            className="flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-stone-700 transition hover:bg-stone-100 hover:text-stone-900 active:scale-95 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+            title="Escolher ou Trocar Preset de Estudos (ENEM, Concurso DF, OAB, etc.)"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span className="hidden xl:inline">Presets</span>
+          </button>
           {/* Theme Toggle Selector (Light / Dark) */}
           <ThemeToggle />
         </div>

@@ -3,6 +3,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { StudyProvider, useStudy } from './context/StudyContext';
 import { Navbar } from './components/layout/Navbar';
 import { NavigationTabs, TabType } from './components/layout/NavigationTabs';
+import { SpreadsheetView } from './components/spreadsheet/SpreadsheetView';
 import { TodayDashboard } from './components/dashboard/TodayDashboard';
 import { ScheduleView } from './components/schedule/ScheduleView';
 import { SubjectsView } from './components/subjects/SubjectsView';
@@ -15,7 +16,7 @@ import { ActiveStudyModal } from './components/study/ActiveStudyModal';
 
 const MainAppContent: React.FC = () => {
   const { state, activeStudyTask, isStudyModalOpen, closeStudyModal } = useStudy();
-  const [currentTab, setCurrentTab] = useState<TabType>('hoje');
+  const [currentTab, setCurrentTab] = useState<TabType>('planilha');
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(
     !state.profile.onboardingCompleted
   );
@@ -36,6 +37,8 @@ const MainAppContent: React.FC = () => {
 
       {/* Main Viewport Container */}
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        {currentTab === 'planilha' && <SpreadsheetView />}
+
         {currentTab === 'hoje' && (
           <TodayDashboard
             onNavigateToSchedule={() => setCurrentTab('cronograma')}

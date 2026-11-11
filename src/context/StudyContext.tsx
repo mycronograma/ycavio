@@ -11,6 +11,7 @@ import {
   loadStoredState,
   saveStoredState,
   resetAppToOnboarding,
+  STUDY_PRESETS,
   INITIAL_ACHIEVEMENTS,
 } from '../services/storageService';
 import {
@@ -50,6 +51,9 @@ interface StudyContextValue {
   }) => void;
   updateSubject: (updatedSub: Subject) => void;
   deleteSubject: (subjectId: string) => void;
+  updateSubjectSpreadsheetField: (subjectId: string, field: 'pareiEm' | 'revisaoNotes' | 'cadernoQuestoes' | 'ciclo' | 'concluida' | 'weight', value: any) => void;
+  advanceAllCycles: () => void;
+  applyPreset: (presetId: string) => void;
   completeSpacedReview: (reviewId: string, rating: 'facil' | 'medio' | 'dificil') => void;
   completeOnboarding: (profile: Partial<UserProfile>, subjects: Subject[]) => void;
   updateProfile: (profile: Partial<UserProfile>) => void;
@@ -340,6 +344,11 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         completedTasksCount: 0,
         totalExercisesDone: 0,
         totalExercisesCorrect: 0,
+        ciclo: 0,
+        revisaoNotes: '',
+        cadernoQuestoes: '',
+        pareiEm: '',
+        concluida: false,
       };
 
       const updatedSubjects = [...prev.subjects, createdSubject];
@@ -375,6 +384,74 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ...prev,
         subjects: updatedSubjects,
         tasks: updatedTasks,
+      };
+    });
+  }, []);
+
+  const updateSubjectSpreadsheetField = useCallback((subjectId: string, field: 'pareiEm' | 'revisaoNotes' | 'cadernoQuestoes' | 'ciclo' | 'concluida' | 'weight', value: any) => {
+    setState((prev) => ({
+      ...prev,
+      subjects: prev.subjects.map((s) => (s.id === subjectId ? { ...s, [field]: value } : s)),
+      tasks: prev.tasks.map((t) => (t.subjectId === subjectId && field === 'pareiEm' ? { ...t, pareiEm: value } : t)),
+    }));
+  }, []);
+
+  const applyPreset = useCallback((presetId: string) => {
+    // using STUDY_PRESETS imported
+    const matched = STUDY_PRESETS.find((p: any) => p.id === presetId);
+    if (!matched) return;
+
+    setState((prev) => {
+      const newSubjects: Subject[] = matched.subjects.map((s: any, idx: number) => ({
+        id: `sub-${Date.now()}-${idx + 1}`,
+        name: s.name,
+        color: s.color,
+        weight: s.weight,
+        difficulty: s.difficulty,
+        knowledgeLevel: s.knowledgeLevel,
+        ciclo: 0,
+        revisaoNotes: s.revisaoNotes || '',
+        cadernoQuestoes: s.cadernoQuestoes || '',
+        pareiEm: s.pareiEm || '',
+        concluida: false,
+        topics: s.topics.map((tName: string, tIdx: number) => ({
+          id: `top-${idx + 1}-${tIdx + 1}`,
+          name: tName,
+          completed: false,
+        })),
+        totalMinutesStudied: 0,
+        completedTasksCount: 0,
+        totalExercisesDone: 0,
+        totalExercisesCorrect: 0,
+      }));
+
+      const newTasks = generateSmartSchedule(prev.profile, newSubjects, [], [], 7);
+
+      return {
+        ...prev,
+        subjects: newSubjects,
+        tasks: newTasks,
+        profile: {
+          ...prev.profile,
+          targetExam: matched.name,
+        },
+      };
+    });
+  }, []);
+
+  const advanceAllCycles = useCallback(() => {
+    setState((prev) => {
+      const nextCiclo = (prev.profile.globalCiclo || 0) + 1;
+      return {
+        ...prev,
+        profile: {
+          ...prev.profile,
+          globalCiclo: nextCiclo,
+        },
+        subjects: prev.subjects.map((s) => ({
+          ...s,
+          ciclo: (s.ciclo || 0) + 1,
+        })),
       };
     });
   }, []);
@@ -533,6 +610,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addSubject,
         updateSubject,
         deleteSubject,
+        updateSubjectSpreadsheetField,
+        advanceAllCycles,
+        applyPreset,
         completeSpacedReview,
         completeOnboarding,
         updateProfile,

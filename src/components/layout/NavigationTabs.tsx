@@ -7,11 +7,12 @@ import {
   Trophy,
   UserCheck,
   Compass,
+  Table2,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { getTodayStr } from '../../services/scheduleEngine';
 
-export type TabType = 'hoje' | 'cronograma' | 'materias' | 'revisoes' | 'progresso' | 'conquistas' | 'perfil';
+export type TabType = 'planilha' | 'hoje' | 'cronograma' | 'materias' | 'revisoes' | 'progresso' | 'conquistas' | 'perfil';
 
 interface NavigationTabsProps {
   currentTab: TabType;
@@ -28,7 +29,8 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
   const pendingToday = state.tasks.filter((t) => t.date === todayStr && t.status === 'pendente').length;
   const pendingReviews = state.reviews.filter((r) => r.dueDate <= todayStr && r.status === 'pendente').length;
 
-  const tabs: Array<{ id: TabType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }> = [
+  const tabs: Array<{ id: TabType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number; highlight?: boolean }> = [
+    { id: 'planilha', label: 'Ciclo / Planilha', icon: Table2, highlight: true },
     { id: 'hoje', label: 'Hoje', icon: Compass, badge: pendingToday > 0 ? pendingToday : undefined },
     { id: 'cronograma', label: 'Cronograma', icon: CalendarDays },
     { id: 'materias', label: 'Matérias', icon: BookOpen },
@@ -54,10 +56,12 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
                 className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all whitespace-nowrap ${
                   isActive
                     ? 'bg-white text-indigo-900 shadow-xs border border-stone-200 dark:bg-stone-800 dark:text-indigo-300 dark:border-stone-700'
+                    : tab.highlight
+                    ? 'text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 hover:text-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-950/70'
                     : 'text-stone-600 hover:bg-stone-200/60 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800/60 dark:hover:text-stone-200'
                 }`}
               >
-                <Icon className={`h-4 w-4 ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-stone-400 dark:text-stone-500'}`} />
+                <Icon className={`h-4 w-4 ${isActive ? 'text-indigo-600 dark:text-indigo-400' : tab.highlight ? 'text-indigo-600 dark:text-indigo-400' : 'text-stone-400 dark:text-stone-500'}`} />
                 <span>{tab.label}</span>
                 {tab.badge !== undefined && (
                   <span

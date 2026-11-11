@@ -13,6 +13,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  ListPlus,
+  Table2,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { Subject, SubjectDifficulty, KnowledgeLevel } from '../../types';
@@ -31,7 +33,10 @@ export const SubjectsView: React.FC = () => {
   const [weight, setWeight] = useState(4);
   const [difficulty, setDifficulty] = useState<SubjectDifficulty>('media');
   const [knowledgeLevel, setKnowledgeLevel] = useState<KnowledgeLevel>('intermediario');
-  const [topicsText, setTopicsText] = useState('');
+
+  // Interactive Topics List (Cada um com botão de + e remoção)
+  const [topicList, setTopicList] = useState<string[]>([]);
+  const [newTopicInput, setNewTopicInput] = useState('');
 
   const colorPalette = [
     '#3b82f6', // blue
@@ -51,7 +56,8 @@ export const SubjectsView: React.FC = () => {
     setWeight(4);
     setDifficulty('media');
     setKnowledgeLevel('intermediario');
-    setTopicsText('');
+    setTopicList(['Introdução e Teoria Inicial', 'Exercícios Práticos']);
+    setNewTopicInput('');
     setEditingSubject(null);
     setIsAddModalOpen(true);
   };
@@ -63,21 +69,40 @@ export const SubjectsView: React.FC = () => {
     setWeight(sub.weight);
     setDifficulty(sub.difficulty);
     setKnowledgeLevel(sub.knowledgeLevel);
-    setTopicsText(sub.topics.map((t) => t.name).join('\n'));
+    setTopicList(sub.topics.map((t) => t.name));
+    setNewTopicInput('');
     setIsAddModalOpen(true);
+  };
+
+  const handleAddTopicToList = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newTopicInput.trim();
+    if (!trimmed) return;
+    setTopicList((prev) => [...prev, trimmed]);
+    setNewTopicInput('');
+  };
+
+  const handleRemoveTopic = (indexToRemove: number) => {
+    setTopicList((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  const handleUpdateTopicName = (index: number, newName: string) => {
+    setTopicList((prev) => {
+      const copy = [...prev];
+      copy[index] = newName;
+      return copy;
+    });
   };
 
   const handleSaveSubject = () => {
     if (!name.trim()) return;
 
-    const parsedTopics = topicsText
-      .split('\n')
-      .map((t) => t.trim())
-      .filter(Boolean);
+    // Filter non-empty topics
+    const cleanTopics = topicList.map((t) => t.trim()).filter(Boolean);
 
     if (editingSubject) {
       // Retain existing topics state if matched by name
-      const updatedTopics = parsedTopics.map((tName, idx) => {
+      const updatedTopics = cleanTopics.map((tName, idx) => {
         const existing = editingSubject.topics.find((t) => t.name.toLowerCase() === tName.toLowerCase());
         return {
           id: existing?.id || `top-${editingSubject.id}-${idx + 1}`,
@@ -105,7 +130,7 @@ export const SubjectsView: React.FC = () => {
         weight,
         difficulty,
         knowledgeLevel,
-        topics: parsedTopics.length > 0 ? parsedTopics : ['Introdução aos Conceitos', 'Tópicos Centrais', 'Exercícios Práticos'],
+        topics: cleanTopics.length > 0 ? cleanTopics : ['Introdução aos Conceitos', 'Tópicos Centrais', 'Exercícios Práticos'],
       });
     }
 
@@ -122,7 +147,7 @@ export const SubjectsView: React.FC = () => {
             <span>Matérias & Áreas de Estudo</span>
           </h2>
           <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
-            Gerencie pesos, níveis de dificuldade e acompanhe o progresso detalhado de cada disciplina
+            Gerencie pesos, níveis de dificuldade e adicione tópicos facilmente com o botão de +
           </p>
         </div>
 
@@ -201,7 +226,7 @@ export const SubjectsView: React.FC = () => {
                       type="button"
                       onClick={() => handleOpenEdit(sub)}
                       className="p-1.5 text-stone-400 hover:text-stone-700 rounded-md hover:bg-stone-100 dark:text-stone-500 dark:hover:text-stone-200 dark:hover:bg-stone-800"
-                      title="Editar matéria"
+                      title="Editar matéria e tópicos"
                     >
                       <Edit2 className="h-3.5 w-3.5" />
                     </button>
@@ -307,7 +332,7 @@ export const SubjectsView: React.FC = () => {
         })}
       </div>
 
-      {/* Add / Edit Modal */}
+      {/* Add / Edit Modal with + Button for Topics */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-stone-900/60 p-4 backdrop-blur-xs">
           <div className="relative w-full max-w-lg rounded-2xl border border-stone-200 bg-white p-6 shadow-2xl dark:border-stone-800 dark:bg-stone-900">
@@ -331,7 +356,7 @@ export const SubjectsView: React.FC = () => {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Ex: Direito Constitucional, Física Quântica..."
+                  placeholder="Ex: Direito Constitucional, Matemática..."
                   className="w-full rounded-xl border border-stone-300 px-3.5 py-2 text-sm text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:focus:border-indigo-400"
                 />
               </div>
@@ -407,18 +432,76 @@ export const SubjectsView: React.FC = () => {
                 </select>
               </div>
 
-              {/* Topics text */}
+              {/* Tópicos com Símbolo de + Individual */}
               <div>
-                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider mb-1">
-                  Tópicos / Conteúdos (Um por linha)
-                </label>
-                <textarea
-                  value={topicsText}
-                  onChange={(e) => setTopicsText(e.target.value)}
-                  placeholder="Ex:&#10;Tópico 1: Teoria Geral&#10;Tópico 2: Exercícios Avançados&#10;Tópico 3: Jurisprudência"
-                  rows={4}
-                  className="w-full rounded-xl border border-stone-300 p-3 text-xs text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:focus:border-indigo-400 font-mono"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider">
+                    Tópicos / Conteúdos ({topicList.length})
+                  </label>
+                  <span className="text-[10px] text-stone-400">Adicione com o símbolo de +</span>
+                </div>
+
+                {/* Input with (+) Button */}
+                <div className="flex gap-2 mb-2.5">
+                  <input
+                    type="text"
+                    value={newTopicInput}
+                    onChange={(e) => setNewTopicInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddTopicToList();
+                      }
+                    }}
+                    placeholder="Digite um tópico e clique no +..."
+                    className="flex-1 rounded-xl border border-stone-300 px-3.5 py-2 text-xs text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAddTopicToList()}
+                    className="flex items-center justify-center gap-1 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 active:scale-95 transition"
+                    title="Adicionar tópico"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Adicionar</span>
+                  </button>
+                </div>
+
+                {/* Interactive list of added topics */}
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {topicList.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-stone-200 dark:border-stone-700 p-3 text-center text-xs text-stone-400">
+                      Nenhum tópico adicionado ainda. Use o campo acima para adicionar.
+                    </div>
+                  ) : (
+                    topicList.map((topName, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50/70 p-2 dark:border-stone-700 dark:bg-stone-800/60"
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-stone-200 dark:bg-stone-700 text-[10px] font-bold text-stone-600 dark:text-stone-300">
+                            {idx + 1}
+                          </span>
+                          <input
+                            type="text"
+                            value={topName}
+                            onChange={(e) => handleUpdateTopicName(idx, e.target.value)}
+                            className="flex-1 bg-transparent text-xs font-medium text-stone-900 dark:text-stone-100 outline-hidden"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTopic(idx)}
+                          className="p-1 text-stone-400 hover:text-rose-600 rounded-md hover:bg-stone-200 dark:hover:bg-stone-700"
+                          title="Remover este tópico"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
 
               <div className="flex gap-3 pt-2">

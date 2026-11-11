@@ -39,7 +39,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
   const [name, setName] = useState(profile.name);
   const [objective, setObjective] = useState(profile.objective);
   const [targetExam, setTargetExam] = useState(profile.targetExam || '');
+  const [hasExamDate, setHasExamDate] = useState(!!profile.examDate);
   const [examDate, setExamDate] = useState(profile.examDate || '');
+  const [targetTotalHours, setTargetTotalHours] = useState(profile.targetTotalHours || 200);
   const [dailyMinutes, setDailyMinutes] = useState(profile.dailyAvailableMinutes);
   const [sessionLength, setSessionLength] = useState(profile.preferredSessionLength);
   const [selectedDays, setSelectedDays] = useState<number[]>(profile.availableDays);
@@ -76,7 +78,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
       name: name.trim() || 'Estudante',
       objective: objective.trim(),
       targetExam: targetExam.trim(),
-      examDate: examDate || undefined,
+      examDate: hasExamDate ? (examDate || undefined) : undefined,
+      targetTotalHours: !hasExamDate ? targetTotalHours : undefined,
       dailyAvailableMinutes: dailyMinutes,
       preferredSessionLength: sessionLength,
       availableDays: selectedDays,
@@ -273,15 +276,44 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider mb-1.5">
-                Data Prevista da Prova
-              </label>
-              <input
-                type="date"
-                value={examDate}
-                onChange={(e) => setExamDate(e.target.value)}
-                className="w-full rounded-xl border border-stone-300 px-3.5 py-2 text-sm text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:focus:border-indigo-400"
-              />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider">
+                  {hasExamDate ? 'Data Prevista da Prova' : 'Meta de Horas Totais'}
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-stone-500 dark:text-stone-400 cursor-pointer font-medium">
+                  <input
+                    type="checkbox"
+                    checked={hasExamDate}
+                    onChange={(e) => setHasExamDate(e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Tenho data
+                </label>
+              </div>
+              {hasExamDate ? (
+                <input
+                  type="date"
+                  value={examDate}
+                  onChange={(e) => setExamDate(e.target.value)}
+                  className="w-full rounded-xl border border-stone-300 px-3.5 py-2 text-sm text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:focus:border-indigo-400"
+                />
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="10"
+                    max="5000"
+                    step="10"
+                    value={targetTotalHours}
+                    onChange={(e) => setTargetTotalHours(Math.max(1, Number(e.target.value)))}
+                    placeholder="Ex: 200"
+                    className="w-full rounded-xl border border-stone-300 px-3.5 py-2 text-sm text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 font-bold"
+                  />
+                  <span className="text-xs font-bold text-stone-500 dark:text-stone-400 shrink-0">
+                    horas totais
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>

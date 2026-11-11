@@ -310,7 +310,7 @@ export function generateSmartSchedule(
       const taskDuration = Math.min(sessionLength, remainingMinutesToday);
 
       newScheduleTasks.push({
-        id: `task-gen-${chosen.id}-${dateStr}-${slotsAssigned}`,
+        id: `task-gen-${chosen.id}-${dateStr}-${slotsAssigned}-${Math.random().toString(36).slice(2, 7)}`,
         subjectId: chosen.id,
         subjectName: chosen.name,
         subjectColor: chosen.color,
@@ -322,6 +322,9 @@ export function generateSmartSchedule(
         status: 'pendente',
         priorityScore: Math.max(1, Math.round(candidates[0].score)),
         objectives: generateTaskObjectives(taskType, topicInfo.name),
+        pareiEm: chosen.pareiEm,
+        cadernoQuestoes: chosen.cadernoQuestoes,
+        revisaoNotes: chosen.revisaoNotes,
       });
 
       remainingMinutesToday -= taskDuration;
@@ -332,7 +335,12 @@ export function generateSmartSchedule(
   }
 
   // Combine preserved and newly generated tasks
-  return [...preservedTasks, ...newScheduleTasks];
+  // Deduplicate tasks by id just in case
+  const taskMap = new Map<string, Task>();
+  for (const t of [...preservedTasks, ...newScheduleTasks]) {
+    taskMap.set(t.id, t);
+  }
+  return Array.from(taskMap.values());
 }
 
 /**

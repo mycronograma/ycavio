@@ -141,6 +141,17 @@ export const TodayDashboard: React.FC<TodayDashboardProps> = ({
                 <h3 className="text-xl sm:text-2xl font-black text-stone-900 dark:text-stone-100">
                   {nextTask.topicName}
                 </h3>
+                {nextTask.pareiEm && (
+                  <p className="mt-1 text-xs font-semibold text-indigo-700 dark:text-indigo-400 flex items-center gap-1.5">
+                    <span>📍 Você parou em:</span>
+                    <span className="font-bold underline">{nextTask.pareiEm}</span>
+                    {nextTask.cadernoQuestoes && (
+                      <span className="text-stone-500 dark:text-stone-400 font-normal">
+                        • Caderno: {nextTask.cadernoQuestoes}
+                      </span>
+                    )}
+                  </p>
+                )}
                 <p className="mt-1 text-xs sm:text-sm text-stone-500 dark:text-stone-400">
                   Tempo estimado: <strong>{nextTask.durationMinutes} minutos</strong> de foco com objetivos estruturados.
                 </p>
@@ -266,25 +277,34 @@ export const TodayDashboard: React.FC<TodayDashboardProps> = ({
           </button>
         </div>
 
-        {/* Total Exam Countdown */}
+        {/* Total Exam Countdown or Total Hours Goal */}
         <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs dark:border-stone-800 dark:bg-stone-900">
           <span className="text-xs font-bold uppercase tracking-wider text-stone-500 dark:text-stone-400">
-            Reta Final
+            {profile.examDate ? 'Reta Final' : 'Meta de Horas'}
           </span>
-          <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-2xl font-black text-stone-900 dark:text-stone-100">
-              {profile.examDate
-                ? Math.max(
-                    0,
-                    Math.ceil(
-                      (new Date(profile.examDate).getTime() - new Date().getTime()) /
-                        (1000 * 60 * 60 * 24)
-                    )
+          {profile.examDate ? (
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-stone-900 dark:text-stone-100">
+                {Math.max(
+                  0,
+                  Math.ceil(
+                    (new Date(profile.examDate).getTime() - new Date().getTime()) /
+                      (1000 * 60 * 60 * 24)
                   )
-                : '—'}
-            </span>
-            <span className="text-xs text-stone-400 dark:text-stone-500">dias restantes</span>
-          </div>
+                )}
+              </span>
+              <span className="text-xs text-stone-400 dark:text-stone-500">dias restantes</span>
+            </div>
+          ) : (
+            <div className="mt-1 flex items-baseline gap-1.5">
+              <span className="text-2xl font-black text-stone-900 dark:text-stone-100">
+                {Math.round(subjects.reduce((acc, s) => acc + s.totalMinutesStudied, 0) / 60)}h
+              </span>
+              <span className="text-xs text-stone-400 dark:text-stone-500">
+                de {profile.targetTotalHours || 200}h meta
+              </span>
+            </div>
+          )}
           <span className="mt-1 block text-xs text-stone-500 dark:text-stone-400 truncate">
             {profile.targetExam || 'Meta em progresso'}
           </span>
@@ -327,7 +347,7 @@ export const TodayDashboard: React.FC<TodayDashboardProps> = ({
               const isDone = task.status === 'concluida';
               return (
                 <div
-                  key={task.id}
+                  key={`${task.id}-${idx}`}
                   className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border p-4 transition-all ${
                     isDone
                       ? 'border-stone-200 bg-stone-50/60 opacity-80 dark:border-stone-800/60 dark:bg-stone-900/50'
