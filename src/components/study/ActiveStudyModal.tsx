@@ -1,172 +1,556 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X,
   Play,
   Pause,
   RotateCcw,
   CheckCircle2,
-  Clock,
-  Sparkles,
-  BookOpen,
-  HelpCircle,
   Plus,
   Minus,
-  Check,
   FileText,
-  Maximize2,
-  Minimize2,
   Volume2,
   VolumeX,
-  Edit3,
+  Coffee,
+  MapPin,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { Task } from '../../types';
-import { playChimeSound } from '../../lib/audio';
+import { ActiveTimerDraft, Task } from '../../types';
+import { playChimeSound, stopChimeSound, unlockAudioContext } from '../../lib/audio';
+import { getStudyMethodPreset, resolveBreakMinutes } from '../../services/studyMethods';
 
 interface ActiveStudyModalProps {
   task: Task;
   onClose: () => void;
 }
 
-export const ActiveStudyModal: React.FC<ActiveStudyModalProps> = ({ task, onClose }) => {
-  const { state, completeStudySession, updateSubjectSpreadsheetField } = useStudy();
-  const matchedSubject = state.subjects.find((s) => s.id === task.subjectId);
+const TASK_TYPE_LABEL: Record<string, string> = {
+  teoria: 'TEORIA',
+  exercicios: 'QUESTÕES',
+  revisao: 'REVISÃO',
+  simulado: 'SIMULADO',
+};
 
-  // Time state in seconds
-  const initialDuration = Math.max(1, task.durationMinutes);
-  const [totalSeconds, setTotalSeconds] = useState(initialDuration * 60);
-  const [secondsRemaining, setSecondsRemaining] = useState(initialDuration * 60);
+function resolveRingColor(rawColor?: string): string {
+  if (!rawColor) return '#4f46e5';
+  if (rawColor.startsWith('#') || rawColor.startsWith('rgb') || rawColor.startsWith('hsl')) {
+    return rawColor;
+  }
+  return '#4f46e5';
+}
+
+export function formatTimerClock(sec: number): string {
+  const safeSec = Math.max(0, Math.floor(sec));
+  const hrs = Math.floor(safeSec / 3600);
+  const mins = Math.floor((safeSec % 3600) / 60);
+  const s = safeSec % 60;
+  if (hrs > 0) {
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${String(mins).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+export const ActiveStudyModal: React.FC<ActiveStudyModalProps> = ({ task, onClose }) => {
+  const {
+    state,
+    activeTimerDraft,
+    saveTimerProgress,
+    clearTimerDraft,
+    completeStudySession,
+    updateSubjectSpreadsheetField,
+  } = useStudy();
+
+  const matchedSubject = state.subjects.find((s) => s.id === task.subjectId);
+  const methodPreset = getStudyMethodPreset(state.profile.studyMethod);
+  const configuredBreakMinutes = resolveBreakMinutes(state.profile);
+
+  const matchingDraft =
+    activeTimerDraft && activeTimerDraft.task.id === task.id ? activeTimerDraft : null;
+
+  const defaultPlannedSeconds = Math.max(1, task.durationMinutes) * 60;
+  const initialTotalSeconds = matchingDraft ? matchingDraft.totalSeconds : defaultPlannedSeconds;
+  const initialSecondsRemaining = matchingDraft
+    ? matchingDraft.secondsRemaining
+    : defaultPlannedSeconds;
+
+  const initialPareiEm = matchingDraft
+    ? matchingDraft.pareiEm
+    : task.pareiEm || matchedSubject?.pareiEm || '';
+  const initialCaderno = matchingDraft
+    ? matchingDraft.cadernoQuestoes
+    : task.cadernoQuestoes || matchedSubject?.cadernoQuestoes || '';
+  const initialExercisesDone = matchingDraft
+    ? matchingDraft.exercisesDone
+    : task.exercisesDone || 0;
+  const initialExercisesCorrect = matchingDraft
+    ? matchingDraft.exercisesCorrect
+    : task.exercisesCorrect || 0;
+  const initialNotes = matchingDraft ? matchingDraft.notes : task.notes || '';
+
+  // Time state in seconds (always restored as PAUSADO when reopened from saved draft)
+  const [totalSeconds, setTotalSeconds] = useState(initialTotalSeconds);
+  const [secondsRemaining, setSecondsRemaining] = useState(initialSecondsRemaining);
   const [isActive, setIsActive] = useState(false);
 
-  // Editing time directly (HH:MM)
-  const [isEditingTime, setIsEditingTime] = useState(false);
-  const [editHours, setEditHours] = useState(Math.floor(initialDuration / 60));
-  const [editMinutes, setEditMinutes] = useState(initialDuration % 60);
-
-  // Zen mode (fullscreen)
-  const [isZenMode, setIsZenMode] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-
-  // Spreadsheet "Onde Parei" and "Caderno de Questões" inputs during study
-  const [pareiEmValue, setPareiEmValue] = useState(task.pareiEm || matchedSubject?.pareiEm || '');
-  const [cadernoQuestoesValue, setCadernoQuestoesValue] = useState(
-    task.cadernoQuestoes || matchedSubject?.cadernoQuestoes || ''
+  // Break countdown state
+  const [breakDurationMinutes, setBreakDurationMinutes] = useState(configuredBreakMinutes);
+  const [breakTotalSeconds, setBreakTotalSeconds] = useState(configuredBreakMinutes * 60);
+  const [breakSecondsRemaining, setBreakSecondsRemaining] = useState(configuredBreakMinutes * 60);
+  const [isBreakRunning, setIsBreakRunning] = useState(false);
+  const [capturedFocusMinutes, setCapturedFocusMinutes] = useState<number | null>(() =>
+    matchingDraft && matchingDraft.secondsRemaining <= 0
+      ? Math.max(1, Math.round(matchingDraft.totalSeconds / 60))
+      : null
   );
 
-  // Completed objectives & checklist
-  const [checkedObjectives, setCheckedObjectives] = useState<Record<number, boolean>>({});
-  const [checkedTopics, setCheckedTopics] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {};
-    if (matchedSubject?.topics) {
-      matchedSubject.topics.forEach((top) => {
-        initial[top.id] = top.completed;
-      });
-    }
-    return initial;
+  // Editing time directly (click on timer numbers)
+  const [isEditingTime, setIsEditingTime] = useState(false);
+  const [editHours, setEditHours] = useState(Math.floor(initialSecondsRemaining / 3600));
+  const [editMinutes, setEditMinutes] = useState(Math.floor((initialSecondsRemaining % 3600) / 60));
+
+  // Audio & discreet details drawer (collapsed by default)
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
+
+  // Optional session fields synced with spreadsheet & draft
+  const [pareiEmValue, setPareiEmValue] = useState(initialPareiEm);
+  const [cadernoQuestoesValue, setCadernoQuestoesValue] = useState(initialCaderno);
+  const [exercisesDone, setExercisesDone] = useState(initialExercisesDone);
+  const [exercisesCorrect, setExercisesCorrect] = useState(initialExercisesCorrect);
+  const [notes, setNotes] = useState(initialNotes);
+
+  // Unified step flow: focus ring ('active'), single-step completion ('summary'), or optional green break ring ('break')
+  const [finishStep, setFinishStep] = useState<'active' | 'summary' | 'break'>(() =>
+    matchingDraft && matchingDraft.secondsRemaining <= 0 ? 'summary' : 'active'
+  );
+  const [selectedRating, setSelectedRating] = useState<'facil' | 'medio' | 'dificil'>('medio');
+
+  // Wall-clock refs so background tab throttling or reload never loses exact remaining time
+  const focusEndTimestampRef = useRef<number | null>(null);
+  const breakEndTimestampRef = useRef<number | null>(null);
+  const hadDraftOnOpenRef = useRef<boolean>(Boolean(matchingDraft));
+
+  const latestRef = useRef({
+    task,
+    totalSeconds,
+    secondsRemaining,
+    isActive,
+    pareiEmValue,
+    cadernoQuestoesValue,
+    exercisesDone,
+    exercisesCorrect,
+    notes,
+    finishStep,
+    isBreakRunning,
+    breakSecondsRemaining,
   });
 
-  // Exercise tracking
-  const [exercisesDone, setExercisesDone] = useState(task.exercisesDone || 0);
-  const [exercisesCorrect, setExercisesCorrect] = useState(task.exercisesCorrect || 0);
-
-  // Scratchpad
-  const [notes, setNotes] = useState(task.notes || '');
-
-  // Step for finishing: 'active' | 'rating' | 'reward'
-  const [finishStep, setFinishStep] = useState<'active' | 'rating' | 'reward'>('active');
-  const [selectedRating, setSelectedRating] = useState<'facil' | 'medio' | 'dificil'>('medio');
-  const [rewardData, setRewardData] = useState<{
-    xpEarned: number;
-    newLevel: boolean;
-    newLevelNum: number;
-  } | null>(null);
-
-  const timerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (isActive) {
-      timerRef.current = window.setInterval(() => {
-        setSecondsRemaining((prev) => {
-          if (prev <= 1) {
-            setIsActive(false);
-            if (timerRef.current) clearInterval(timerRef.current);
-            if (soundEnabled) {
-              playChimeSound();
-            }
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isActive, soundEnabled]);
-
-  // Adjust time by delta minutes (e.g. +5, -5, +15)
-  const adjustMinutes = (deltaMinutes: number) => {
-    const deltaSeconds = deltaMinutes * 60;
-    const newRemaining = Math.max(60, secondsRemaining + deltaSeconds);
-    const newTotal = Math.max(newRemaining, totalSeconds + deltaSeconds);
-    setSecondsRemaining(newRemaining);
-    setTotalSeconds(newTotal);
+  latestRef.current = {
+    task,
+    totalSeconds,
+    secondsRemaining,
+    isActive,
+    pareiEmValue,
+    cadernoQuestoesValue,
+    exercisesDone,
+    exercisesCorrect,
+    notes,
+    finishStep,
+    isBreakRunning,
+    breakSecondsRemaining,
   };
 
-  // Save manual HH:MM edit
-  const applyManualTimeEdit = () => {
+  const buildDraftSnapshot = useCallback(
+    (running: boolean, overrideRemaining?: number, overrideTotal?: number): ActiveTimerDraft => {
+      const snap = latestRef.current;
+      const resolvedTotal = overrideTotal ?? snap.totalSeconds;
+      const resolvedRemaining = Math.max(
+        0,
+        Math.min(resolvedTotal, overrideRemaining ?? snap.secondsRemaining)
+      );
+      return {
+        task: snap.task,
+        totalSeconds: resolvedTotal,
+        secondsRemaining: resolvedRemaining,
+        isRunning: running,
+        pareiEm: snap.pareiEmValue,
+        cadernoQuestoes: snap.cadernoQuestoesValue,
+        exercisesDone: snap.exercisesDone,
+        exercisesCorrect: Math.min(snap.exercisesDone, snap.exercisesCorrect),
+        notes: snap.notes,
+        updatedAt: Date.now(),
+      };
+    },
+    []
+  );
+
+  const computeCurrentFocusRemaining = useCallback((): number => {
+    const snap = latestRef.current;
+    if (snap.isActive && focusEndTimestampRef.current !== null) {
+      return Math.max(0, Math.ceil((focusEndTimestampRef.current - Date.now()) / 1000));
+    }
+    return snap.secondsRemaining;
+  }, []);
+
+  const pauseAndPersist = useCallback(() => {
+    const snap = latestRef.current;
+    const remaining = computeCurrentFocusRemaining();
+    focusEndTimestampRef.current = null;
+    if (snap.isActive) {
+      setIsActive(false);
+      setSecondsRemaining(remaining);
+    }
+
+    const detailsChanged =
+      snap.pareiEmValue !== (snap.task.pareiEm || matchedSubject?.pareiEm || '') ||
+      snap.cadernoQuestoesValue !==
+        (snap.task.cadernoQuestoes || matchedSubject?.cadernoQuestoes || '') ||
+      snap.exercisesDone !== (snap.task.exercisesDone || 0) ||
+      snap.exercisesCorrect !== (snap.task.exercisesCorrect || 0) ||
+      snap.notes !== (snap.task.notes || '');
+
+    const hasProgress =
+      remaining < snap.totalSeconds ||
+      snap.totalSeconds !== defaultPlannedSeconds ||
+      detailsChanged ||
+      hadDraftOnOpenRef.current ||
+      snap.finishStep !== 'active';
+
+    if (hasProgress) {
+      saveTimerProgress(buildDraftSnapshot(false, remaining));
+      hadDraftOnOpenRef.current = true;
+    }
+  }, [
+    buildDraftSnapshot,
+    computeCurrentFocusRemaining,
+    defaultPlannedSeconds,
+    matchedSubject?.cadernoQuestoes,
+    matchedSubject?.pareiEm,
+    saveTimerProgress,
+  ]);
+
+  // Persist optional Detalhes changes immediately whenever session already started or has draft
+  useEffect(() => {
+    const snap = latestRef.current;
+    const detailsChanged =
+      pareiEmValue !== (task.pareiEm || matchedSubject?.pareiEm || '') ||
+      cadernoQuestoesValue !== (task.cadernoQuestoes || matchedSubject?.cadernoQuestoes || '') ||
+      exercisesDone !== (task.exercisesDone || 0) ||
+      exercisesCorrect !== (task.exercisesCorrect || 0) ||
+      notes !== (task.notes || '');
+
+    if (
+      snap.secondsRemaining < snap.totalSeconds ||
+      hadDraftOnOpenRef.current ||
+      detailsChanged
+    ) {
+      saveTimerProgress(buildDraftSnapshot(snap.isActive, computeCurrentFocusRemaining()));
+      hadDraftOnOpenRef.current = true;
+    }
+  }, [
+    pareiEmValue,
+    cadernoQuestoesValue,
+    exercisesDone,
+    exercisesCorrect,
+    notes,
+    task.pareiEm,
+    task.cadernoQuestoes,
+    task.exercisesDone,
+    task.exercisesCorrect,
+    task.notes,
+    matchedSubject?.pareiEm,
+    matchedSubject?.cadernoQuestoes,
+    buildDraftSnapshot,
+    computeCurrentFocusRemaining,
+    saveTimerProgress,
+  ]);
+
+  // Wall-clock focus countdown interval (persists every second tick & syncs immediately on tab return)
+  useEffect(() => {
+    if (!isActive || finishStep !== 'active') {
+      focusEndTimestampRef.current = null;
+      return;
+    }
+
+    if (focusEndTimestampRef.current === null) {
+      focusEndTimestampRef.current = Date.now() + latestRef.current.secondsRemaining * 1000;
+    }
+
+    const tick = () => {
+      if (focusEndTimestampRef.current === null) return;
+      const remaining = Math.max(0, Math.ceil((focusEndTimestampRef.current - Date.now()) / 1000));
+
+      if (remaining !== latestRef.current.secondsRemaining) {
+        setSecondsRemaining(remaining);
+        if (remaining > 0) {
+          saveTimerProgress(buildDraftSnapshot(true, remaining));
+          hadDraftOnOpenRef.current = true;
+        }
+      }
+
+      if (remaining <= 0) {
+        focusEndTimestampRef.current = null;
+        setIsActive(false);
+        setSecondsRemaining(0);
+        if (soundEnabled) {
+          playChimeSound();
+        }
+        setCapturedFocusMinutes(Math.max(1, Math.round(latestRef.current.totalSeconds / 60)));
+        setBreakDurationMinutes(configuredBreakMinutes);
+        saveTimerProgress(buildDraftSnapshot(false, 0));
+        hadDraftOnOpenRef.current = true;
+        setFinishStep('summary');
+      }
+    };
+
+    const handleTabReturn = () => {
+      if (!document.hidden) {
+        tick();
+      }
+    };
+
+    const intervalId = window.setInterval(tick, 250);
+    document.addEventListener('visibilitychange', handleTabReturn);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleTabReturn);
+    };
+  }, [
+    isActive,
+    finishStep,
+    soundEnabled,
+    configuredBreakMinutes,
+    buildDraftSnapshot,
+    saveTimerProgress,
+  ]);
+
+  // Wall-clock break countdown interval (continues across tab switches & syncs on return)
+  useEffect(() => {
+    if (!isBreakRunning || finishStep !== 'break') {
+      breakEndTimestampRef.current = null;
+      return;
+    }
+
+    if (breakEndTimestampRef.current === null) {
+      breakEndTimestampRef.current = Date.now() + latestRef.current.breakSecondsRemaining * 1000;
+    }
+
+    const tickBreak = () => {
+      if (breakEndTimestampRef.current === null) return;
+      const remaining = Math.max(0, Math.ceil((breakEndTimestampRef.current - Date.now()) / 1000));
+      if (remaining !== latestRef.current.breakSecondsRemaining) {
+        setBreakSecondsRemaining(remaining);
+      }
+      if (remaining <= 0) {
+        breakEndTimestampRef.current = null;
+        setIsBreakRunning(false);
+        setBreakSecondsRemaining(0);
+        if (soundEnabled) {
+          playChimeSound();
+        }
+      }
+    };
+
+    const handleBreakTabReturn = () => {
+      if (!document.hidden) {
+        tickBreak();
+      }
+    };
+
+    const intervalId = window.setInterval(tickBreak, 250);
+    document.addEventListener('visibilitychange', handleBreakTabReturn);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleBreakTabReturn);
+    };
+  }, [isBreakRunning, finishStep, soundEnabled]);
+
+  // Save without pausing on tab switch; auto-pause & save ONLY when closing/reloading screen
+  useEffect(() => {
+    const handleVisibilitySave = () => {
+      if (document.hidden) {
+        const snap = latestRef.current;
+        if (snap.isActive && snap.finishStep === 'active') {
+          const remaining = computeCurrentFocusRemaining();
+          saveTimerProgress(buildDraftSnapshot(true, remaining));
+          hadDraftOnOpenRef.current = true;
+        }
+      }
+    };
+
+    const handlePageExit = () => {
+      pauseAndPersist();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilitySave);
+    window.addEventListener('pagehide', handlePageExit);
+    window.addEventListener('beforeunload', handlePageExit);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilitySave);
+      window.removeEventListener('pagehide', handlePageExit);
+      window.removeEventListener('beforeunload', handlePageExit);
+    };
+  }, [buildDraftSnapshot, computeCurrentFocusRemaining, pauseAndPersist, saveTimerProgress]);
+
+  // Live countdown in browser tab title
+  useEffect(() => {
+    const originalTitle = document.title;
+    return () => {
+      document.title = originalTitle;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (finishStep === 'active') {
+      if (isActive) {
+        document.title = `${formatTimerClock(secondsRemaining)} · ${task.subjectName}`;
+      } else if (secondsRemaining < totalSeconds) {
+        document.title = `⏸ ${formatTimerClock(secondsRemaining)} · ${task.subjectName}`;
+      } else {
+        document.title = `${task.subjectName} · Foco`;
+      }
+    } else if (finishStep === 'break') {
+      document.title = `☕ ${formatTimerClock(breakSecondsRemaining)} · Pausa`;
+    } else {
+      document.title = `Concluir · ${task.subjectName}`;
+    }
+  }, [
+    finishStep,
+    isActive,
+    secondsRemaining,
+    totalSeconds,
+    breakSecondsRemaining,
+    task.subjectName,
+  ]);
+
+  const handleStartFocus = () => {
+    if (soundEnabled) {
+      unlockAudioContext();
+    }
+    setIsEditingTime(false);
+    const currentRem = latestRef.current.secondsRemaining;
+    focusEndTimestampRef.current = Date.now() + currentRem * 1000;
+    setIsActive(true);
+    saveTimerProgress(buildDraftSnapshot(true, currentRem));
+    hadDraftOnOpenRef.current = true;
+  };
+
+  const handlePauseFocus = () => {
+    pauseAndPersist();
+  };
+
+  const handleResetTimer = () => {
+    focusEndTimestampRef.current = null;
+    setIsActive(false);
+    setIsEditingTime(false);
+    setSecondsRemaining(totalSeconds);
+    setCapturedFocusMinutes(null);
+    hadDraftOnOpenRef.current = false;
+    clearTimerDraft(task.id);
+  };
+
+  const handleCloseModal = () => {
+    stopChimeSound();
+    const remaining = computeCurrentFocusRemaining();
+    focusEndTimestampRef.current = null;
+    breakEndTimestampRef.current = null;
+    setIsActive(false);
+    setIsBreakRunning(false);
+
+    const detailsChanged =
+      pareiEmValue !== (task.pareiEm || matchedSubject?.pareiEm || '') ||
+      cadernoQuestoesValue !== (task.cadernoQuestoes || matchedSubject?.cadernoQuestoes || '') ||
+      exercisesDone !== (task.exercisesDone || 0) ||
+      exercisesCorrect !== (task.exercisesCorrect || 0) ||
+      notes !== (task.notes || '');
+
+    const hasProgress =
+      remaining < totalSeconds ||
+      totalSeconds !== defaultPlannedSeconds ||
+      detailsChanged ||
+      hadDraftOnOpenRef.current ||
+      finishStep !== 'active';
+
+    if (hasProgress) {
+      saveTimerProgress(buildDraftSnapshot(false, remaining));
+    } else {
+      clearTimerDraft(task.id);
+    }
+
+    onClose();
+  };
+
+  const adjustMinutes = (deltaMinutes: number) => {
+    const currentTotalMinutes = editHours * 60 + editMinutes;
+    const nextTotalMinutes = Math.max(1, currentTotalMinutes + deltaMinutes);
+    setEditHours(Math.floor(nextTotalMinutes / 60));
+    setEditMinutes(nextTotalMinutes % 60);
+  };
+
+  const applyManualTimeEdit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const safeH = Math.max(0, Number(editHours) || 0);
     const safeM = Math.max(0, Math.min(59, Number(editMinutes) || 0));
     const totalMins = safeH * 60 + safeM;
     if (totalMins <= 0) return;
 
     const newSec = totalMins * 60;
+    focusEndTimestampRef.current = null;
+    setIsActive(false);
     setTotalSeconds(newSec);
     setSecondsRemaining(newSec);
     setIsEditingTime(false);
-  };
 
-  // Calculate actual elapsed minutes
-  const actualMinutes = Math.max(
-    1,
-    Math.round((totalSeconds - secondsRemaining) / 60)
-  );
-
-  const formatTimer = (sec: number) => {
-    const hrs = Math.floor(sec / 3600);
-    const mins = Math.floor((sec % 3600) / 60);
-    const s = sec % 60;
-    if (hrs > 0) {
-      return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    if (hadDraftOnOpenRef.current || newSec !== defaultPlannedSeconds) {
+      saveTimerProgress(buildDraftSnapshot(false, newSec, newSec));
+      hadDraftOnOpenRef.current = true;
     }
-    return `${String(mins).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  const progressPercent = totalSeconds > 0 ? ((totalSeconds - secondsRemaining) / totalSeconds) * 100 : 0;
-
-  const toggleObjective = (index: number) => {
-    setCheckedObjectives((prev) => ({
-      ...prev,
-      [index]: !prev[index],
-    }));
+  const openTimeEditor = () => {
+    const remaining = computeCurrentFocusRemaining();
+    if (isActive) {
+      pauseAndPersist();
+    }
+    setEditHours(Math.floor(remaining / 3600));
+    setEditMinutes(Math.floor((remaining % 3600) / 60));
+    setIsEditingTime(true);
   };
 
-  const toggleSubjectTopic = (topicId: string) => {
-    setCheckedTopics((prev) => ({
-      ...prev,
-      [topicId]: !prev[topicId],
-    }));
-  };
+  const actualMinutes =
+    capturedFocusMinutes ??
+    Math.max(1, Math.round((totalSeconds - secondsRemaining) / 60));
 
-  const handleStartFinish = () => {
+  const handleOpenSummary = () => {
+    const remaining = computeCurrentFocusRemaining();
+    focusEndTimestampRef.current = null;
     setIsActive(false);
-    setFinishStep('rating');
+    setSecondsRemaining(remaining);
+    setCapturedFocusMinutes(Math.max(1, Math.round((totalSeconds - remaining) / 60)));
+    setBreakDurationMinutes(configuredBreakMinutes);
+    saveTimerProgress(buildDraftSnapshot(false, remaining));
+    hadDraftOnOpenRef.current = true;
+    setFinishStep('summary');
+  };
+
+  const handleStartManualBreak = () => {
+    if (soundEnabled) {
+      unlockAudioContext();
+    }
+    stopChimeSound();
+    const mins = Math.min(60, Math.max(1, breakDurationMinutes));
+    const secs = mins * 60;
+    setBreakTotalSeconds(secs);
+    setBreakSecondsRemaining(secs);
+    breakEndTimestampRef.current = Date.now() + secs * 1000;
+    setIsBreakRunning(true);
+    setFinishStep('break');
   };
 
   const handleConfirmCompletion = () => {
-    // 1. Update the subject spreadsheet fields directly
+    stopChimeSound();
     if (task.subjectId) {
       if (pareiEmValue.trim()) {
         updateSubjectSpreadsheetField(task.subjectId, 'pareiEm', pareiEmValue.trim());
@@ -176,524 +560,690 @@ export const ActiveStudyModal: React.FC<ActiveStudyModalProps> = ({ task, onClos
       }
     }
 
-    // 2. Complete study session
-    const res = completeStudySession({
+    completeStudySession({
       taskId: task.id,
       durationMinutes: actualMinutes > 0 ? actualMinutes : Math.round(totalSeconds / 60),
       exercisesDone,
       exercisesCorrect: Math.min(exercisesDone, exercisesCorrect),
       notes: notes.trim()
-        ? `${notes}\n[Parei em: ${pareiEmValue || 'N/A'}]`
-        : `[Parei em: ${pareiEmValue || 'N/A'}]`,
+        ? `${notes.trim()}\n[Parei em: ${pareiEmValue.trim() || 'N/A'}]`
+        : pareiEmValue.trim()
+        ? `[Parei em: ${pareiEmValue.trim()}]`
+        : '',
       performanceRating: selectedRating,
     });
-
-    setRewardData(res);
-    setFinishStep('reward');
   };
 
+  // Ring geometry
+  const ringSize = 224;
+  const strokeWidth = 8;
+  const radius = (ringSize - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  const focusRemainingFraction =
+    totalSeconds > 0 ? Math.max(0, Math.min(1, secondsRemaining / totalSeconds)) : 1;
+  const focusDashOffset = circumference * (1 - focusRemainingFraction);
+
+  const breakRemainingFraction =
+    breakTotalSeconds > 0
+      ? Math.max(0, Math.min(1, breakSecondsRemaining / breakTotalSeconds))
+      : 0;
+  const breakDashOffset = circumference * (1 - breakRemainingFraction);
+
+  const ringAccentColor = resolveRingColor(task.subjectColor);
+  const plannedMinutesDisplay = Math.max(1, Math.round(totalSeconds / 60));
+  const hasStarted = secondsRemaining < totalSeconds || Boolean(matchingDraft);
+
+  const timerStatusLabel = isActive ? 'EM FOCO' : hasStarted ? 'PAUSADO' : 'PLANEJADO';
+
+  // Single concise descriptive line (no automatic 3-step roteiro)
+  const hasDistinctTopic =
+    task.topicName &&
+    task.topicName.trim().toLowerCase() !== task.subjectName.trim().toLowerCase();
+  const singleLineSummary = hasDistinctTopic
+    ? task.topicName
+    : `${methodPreset.shortName} · Pausa ${configuredBreakMinutes} min`;
+
+  const detailsFilledCount =
+    (pareiEmValue.trim() ? 1 : 0) +
+    (cadernoQuestoesValue.trim() ? 1 : 0) +
+    (exercisesDone > 0 ? 1 : 0) +
+    (notes.trim() ? 1 : 0);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-stone-950/80 p-2 sm:p-4 backdrop-blur-md transition-all">
-      <div
-        className={`relative w-full rounded-3xl border border-stone-200 bg-white p-5 sm:p-7 shadow-2xl transition-all duration-300 dark:border-stone-800 dark:bg-stone-900 ${
-          isZenMode ? 'max-w-4xl min-h-[90vh] flex flex-col justify-between' : 'max-w-2xl'
-        }`}
-      >
-        {/* Top bar controls */}
-        <div className="flex items-center justify-between border-b border-stone-100 pb-3 mb-4 dark:border-stone-800">
-          <div className="flex items-center gap-2">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/65 p-3 sm:p-5 backdrop-blur-sm">
+      <div className="relative flex w-full max-w-md flex-col overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-2xl transition-colors duration-200 dark:border-slate-800 dark:bg-[#0b1121] max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)]">
+        {/* Minimal Pinned Header (Subject on left, Sound & Close X on right) */}
+        <div className="flex shrink-0 items-center justify-between gap-2 px-5 pt-4 pb-2">
+          <div className="flex min-w-0 items-center gap-2 text-xs">
             <span
-              className="h-3 w-3 rounded-full"
-              style={{ backgroundColor: task.subjectColor || '#3b82f6' }}
+              className="h-2.5 w-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: finishStep === 'break' ? '#10b981' : ringAccentColor }}
             />
-            <span className="text-xs font-black uppercase tracking-wider text-stone-600 dark:text-stone-300">
-              {task.subjectName}
-            </span>
-            <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 uppercase">
-              {task.type}
+            <span className="truncate font-bold text-stone-800 dark:text-slate-100">
+              {finishStep === 'summary'
+                ? 'Sessão finalizada'
+                : finishStep === 'break'
+                ? 'Pausa programada'
+                : task.subjectName}
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            {/* Audio Toggle */}
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className="p-1.5 text-stone-400 hover:text-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800"
+              onClick={() => {
+                const next = !soundEnabled;
+                setSoundEnabled(next);
+                if (next) {
+                  unlockAudioContext();
+                } else {
+                  stopChimeSound();
+                }
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition"
               title={soundEnabled ? 'Silenciar alarme de conclusão' : 'Ativar alarme de conclusão'}
             >
-              {soundEnabled ? <Volume2 className="h-4 w-4 text-indigo-600 dark:text-indigo-400" /> : <VolumeX className="h-4 w-4" />}
+              {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </button>
 
-            {/* Zen Fullscreen Toggle */}
             <button
               type="button"
-              onClick={() => setIsZenMode(!isZenMode)}
-              className="p-1.5 text-stone-400 hover:text-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800"
-              title={isZenMode ? 'Sair do Modo Zen' : 'Modo Zen (Tela Cheia)'}
+              onClick={handleCloseModal}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-stone-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white transition"
+              title="Pausar e fechar (seu tempo fica salvo)"
             >
-              {isZenMode ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </button>
-
-            {/* Close Button */}
-            <button
-              onClick={onClose}
-              className="p-1.5 text-stone-400 hover:text-stone-700 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800"
-              title="Fechar sessão"
-            >
-              <X className="h-5 w-5" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* STEP 1: ACTIVE STUDY TIMER */}
-        {finishStep === 'active' && (
-          <div className="space-y-5">
-            {/* Subject and Topic info */}
-            <div>
-              <h3 className="text-xl sm:text-2xl font-black text-stone-900 dark:text-stone-100 leading-tight">
-                {task.topicName}
-              </h3>
-              {pareiEmValue && (
-                <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-indigo-700 dark:text-indigo-400">
-                  <span>📍 Você parou em:</span>
-                  <span className="font-bold underline">{pareiEmValue}</span>
+        {/* Scrollable Body */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-6 pt-1 sm:px-7">
+          {/* STEP 1: MINIMALIST CIRCULAR FOCUS TIMER */}
+          {finishStep === 'active' && (
+            <div className="flex flex-col items-center text-center">
+              {/* Type + 1 simple line */}
+              <div className="space-y-1 max-w-xs">
+                <p className="text-[11px] font-extrabold tracking-widest text-stone-500 dark:text-slate-400">
+                  {TASK_TYPE_LABEL[task.type] || 'ESTUDO'}
                 </p>
-              )}
-            </div>
+                <p className="text-sm font-bold text-stone-800 dark:text-slate-100 truncate">
+                  {singleLineSummary}
+                </p>
+                {pareiEmValue && !showDetails && (
+                  <p className="inline-flex items-center justify-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-cyan-400 max-w-full truncate">
+                    <MapPin className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{pareiEmValue}</span>
+                  </p>
+                )}
+              </div>
 
-            {/* MAIN TIMER CARD */}
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-stone-200 bg-stone-50/80 p-6 dark:border-stone-800 dark:bg-stone-800/50 shadow-inner">
-              {/* Manual Time Edit View */}
-              {isEditingTime ? (
-                <div className="flex flex-col items-center gap-3 py-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-stone-500 dark:text-stone-400">
-                    Definir Tempo Manual do Cronômetro
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <div className="flex flex-col items-center">
-                      <input
-                        type="number"
-                        min="0"
-                        max="12"
-                        value={editHours}
-                        onChange={(e) => setEditHours(Number(e.target.value))}
-                        className="w-16 rounded-xl border border-stone-300 bg-white p-2 text-center text-2xl font-black text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
-                      />
-                      <span className="text-[10px] font-bold text-stone-400 mt-1">Horas</span>
-                    </div>
-                    <span className="text-2xl font-black text-stone-400">:</span>
-                    <div className="flex flex-col items-center">
-                      <input
-                        type="number"
-                        min="0"
-                        max="59"
-                        value={editMinutes}
-                        onChange={(e) => setEditMinutes(Number(e.target.value))}
-                        className="w-16 rounded-xl border border-stone-300 bg-white p-2 text-center text-2xl font-black text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
-                      />
-                      <span className="text-[10px] font-bold text-stone-400 mt-1">Minutos</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 mt-1">
+              {/* Circular SVG Ring + Click-to-Edit Timer */}
+              <div className="relative my-5 flex items-center justify-center">
+                <svg
+                  width={ringSize}
+                  height={ringSize}
+                  viewBox={`0 0 ${ringSize} ${ringSize}`}
+                  className="-rotate-90 select-none"
+                >
+                  <circle
+                    cx={ringSize / 2}
+                    cy={ringSize / 2}
+                    r={radius}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={strokeWidth}
+                    className="text-stone-200 dark:text-slate-800"
+                  />
+                  <circle
+                    cx={ringSize / 2}
+                    cy={ringSize / 2}
+                    r={radius}
+                    fill="none"
+                    stroke={ringAccentColor}
+                    strokeWidth={strokeWidth}
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={focusDashOffset}
+                    className="transition-[stroke-dashoffset] duration-300 ease-out"
+                  />
+                </svg>
+
+                {/* Center Content inside Ring */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center px-5">
+                  {isEditingTime ? (
+                    <form
+                      onSubmit={applyManualTimeEdit}
+                      className="flex flex-col items-center gap-2"
+                    >
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          max="12"
+                          value={editHours}
+                          onChange={(e) => setEditHours(Math.max(0, Number(e.target.value) || 0))}
+                          className="w-12 rounded-lg border border-stone-300 bg-stone-50 py-1 text-center font-mono text-xl font-black tabular-nums text-stone-900 outline-hidden focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                          aria-label="Horas"
+                        />
+                        <span className="font-mono text-lg font-black text-stone-400">:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="59"
+                          value={editMinutes}
+                          onChange={(e) =>
+                            setEditMinutes(Math.max(0, Math.min(59, Number(e.target.value) || 0)))
+                          }
+                          className="w-12 rounded-lg border border-stone-300 bg-stone-50 py-1 text-center font-mono text-xl font-black tabular-nums text-stone-900 outline-hidden focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                          aria-label="Minutos"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-1 text-[10px] font-bold tabular-nums">
+                        <button
+                          type="button"
+                          onClick={() => adjustMinutes(-5)}
+                          className="rounded-md border border-stone-200 px-1.5 py-0.5 text-stone-600 hover:bg-stone-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                        >
+                          -5m
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => adjustMinutes(5)}
+                          className="rounded-md border border-stone-200 px-1.5 py-0.5 text-stone-600 hover:bg-stone-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                        >
+                          +5m
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => adjustMinutes(15)}
+                          className="rounded-md border border-stone-200 px-1.5 py-0.5 text-stone-600 hover:bg-stone-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                        >
+                          +15m
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingTime(false)}
+                          className="text-[11px] font-semibold text-stone-400 hover:text-stone-700 dark:hover:text-slate-200"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-indigo-700"
+                        >
+                          Aplicar
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => setIsEditingTime(false)}
-                      className="rounded-lg px-3 py-1 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:text-stone-400"
+                      onClick={openTimeEditor}
+                      className="group flex flex-col items-center rounded-2xl px-3 py-2 hover:bg-stone-100/70 dark:hover:bg-slate-800/40 transition"
+                      title="Toque no tempo para ajustar"
                     >
-                      Cancelar
+                      <span className="font-mono tabular-nums text-4xl sm:text-[42px] font-black leading-none tracking-tight text-stone-900 dark:text-white">
+                        {formatTimerClock(secondsRemaining)}
+                      </span>
+                      <span
+                        className={`mt-2 text-[10px] font-bold tracking-[0.2em] transition-colors ${
+                          isActive
+                            ? 'text-indigo-600 dark:text-cyan-400'
+                            : hasStarted
+                            ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-stone-400 group-hover:text-indigo-600 dark:text-slate-500 dark:group-hover:text-cyan-400'
+                        }`}
+                      >
+                        {timerStatusLabel}
+                      </span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={applyManualTimeEdit}
-                      className="rounded-lg bg-indigo-600 px-4 py-1 text-xs font-bold text-white hover:bg-indigo-700 shadow-xs"
-                    >
-                      Salvar Tempo
-                    </button>
-                  </div>
+                  )}
                 </div>
-              ) : (
-                /* Regular Large Timer Display */
-                <div className="flex flex-col items-center">
+              </div>
+
+              {/* Subtle Status / Remaining Note */}
+              <p className="text-xs font-medium text-stone-500 dark:text-slate-400 tabular-nums">
+                {hasStarted
+                  ? `${formatTimerClock(secondsRemaining)} restantes de ${plannedMinutesDisplay} min`
+                  : `Toque no tempo para editar · ${plannedMinutesDisplay} min planejado`}
+              </p>
+
+              {/* Primary Action Controls */}
+              <div className="mt-5 flex w-full items-center justify-center gap-2.5">
+                {!hasStarted && !isActive ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditHours(Math.floor(secondsRemaining / 3600));
-                      setEditMinutes(Math.floor((secondsRemaining % 3600) / 60));
-                      setIsEditingTime(true);
-                    }}
-                    className="group relative flex items-center gap-2 rounded-2xl px-4 py-1 hover:bg-stone-200/50 dark:hover:bg-stone-700/40 transition"
-                    title="Clique para editar horas e minutos diretamente"
+                    onClick={handleStartFocus}
+                    className="flex w-full max-w-[230px] items-center justify-center gap-2 rounded-full bg-indigo-600 px-6 py-3 text-xs font-extrabold text-white shadow-sm hover:bg-indigo-700 active:scale-95 transition whitespace-nowrap shrink-0"
                   >
-                    <span className="font-mono text-5xl sm:text-6xl font-black tracking-tight text-stone-900 dark:text-stone-100">
-                      {formatTimer(secondsRemaining)}
-                    </span>
-                    <Edit3 className="h-4 w-4 text-stone-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <Play className="h-3.5 w-3.5 fill-white" />
+                    <span>Iniciar Sessão</span>
                   </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleResetTimer}
+                      className="flex h-10 w-10 items-center justify-center rounded-full border border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 transition shrink-0"
+                      title="Reiniciar e descartar rascunho"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                    </button>
 
-                  <span className="mt-1 text-xs font-semibold text-stone-400 dark:text-stone-500">
-                    {isActive ? '⏱ Foco em andamento' : 'Pausado • Clique no tempo para editar'}
+                    <button
+                      type="button"
+                      onClick={isActive ? handlePauseFocus : handleStartFocus}
+                      className={`flex items-center justify-center gap-2 rounded-full px-6 py-2.5 text-xs font-extrabold text-white shadow-sm active:scale-95 transition whitespace-nowrap shrink-0 ${
+                        isActive
+                          ? 'bg-amber-600 hover:bg-amber-700'
+                          : 'bg-indigo-600 hover:bg-indigo-700'
+                      }`}
+                    >
+                      {isActive ? (
+                        <>
+                          <Pause className="h-3.5 w-3.5 fill-white" />
+                          <span>Pausar</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-3.5 w-3.5 fill-white" />
+                          <span>Continuar</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleOpenSummary}
+                      className="flex items-center justify-center gap-1.5 rounded-full bg-emerald-600 px-5 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-700 active:scale-95 transition whitespace-nowrap shrink-0"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>Concluir</span>
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Discreet Toggle for Optional Session Details */}
+              <button
+                type="button"
+                onClick={() => setShowDetails((prev) => !prev)}
+                className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-stone-500 hover:text-stone-900 dark:text-slate-400 dark:hover:text-white transition"
+              >
+                <span>{showDetails ? 'Ocultar detalhes' : 'Detalhes'}</span>
+                {detailsFilledCount > 0 && !showDetails && (
+                  <span className="tabular-nums text-[11px] font-bold text-indigo-600 dark:text-cyan-400">
+                    ({detailsFilledCount})
                   </span>
+                )}
+                {showDetails ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+              </button>
+
+              {/* Collapsible Details Drawer (Hidden by Default) */}
+              {showDetails && (
+                <div className="mt-4 w-full border-t border-stone-200 pt-4 text-left dark:border-slate-800 space-y-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-stone-600 dark:text-slate-300 mb-1">
+                        <MapPin className="h-3 w-3 text-indigo-500 dark:text-cyan-400" />
+                        <span>Onde parou (PAREI)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={pareiEmValue}
+                        onChange={(e) => setPareiEmValue(e.target.value)}
+                        placeholder="Ex: aula 1.6..."
+                        className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-hidden focus:border-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:border-cyan-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-stone-600 dark:text-slate-300 mb-1">
+                        <FileText className="h-3 w-3 text-indigo-500 dark:text-cyan-400" />
+                        <span>Caderno de questões</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={cadernoQuestoesValue}
+                        onChange={(e) => setCadernoQuestoesValue(e.target.value)}
+                        placeholder="Ex: questão 40..."
+                        className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-hidden focus:border-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:border-cyan-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Exercise Counters */}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-stone-50/70 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+                      <span className="text-[11px] font-semibold text-stone-600 dark:text-slate-300">
+                        Questões
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextDone = Math.max(0, exercisesDone - 1);
+                            setExercisesDone(nextDone);
+                            setExercisesCorrect((prev) => Math.min(nextDone, prev));
+                          }}
+                          className="rounded border border-stone-200 p-0.5 text-stone-500 hover:bg-white dark:border-slate-700 dark:text-slate-400"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <span className="w-6 text-center text-xs font-bold tabular-nums text-stone-900 dark:text-white">
+                          {exercisesDone}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setExercisesDone(exercisesDone + 1)}
+                          className="rounded border border-stone-200 p-0.5 text-stone-500 hover:bg-white dark:border-slate-700 dark:text-slate-400"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-stone-50/70 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+                      <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                        Acertos
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setExercisesCorrect(Math.max(0, exercisesCorrect - 1))}
+                          className="rounded border border-stone-200 p-0.5 text-stone-500 hover:bg-white dark:border-slate-700 dark:text-slate-400"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+                        <span className="w-6 text-center text-xs font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                          {exercisesCorrect}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExercisesCorrect(Math.min(exercisesDone, exercisesCorrect + 1))
+                          }
+                          className="rounded border border-stone-200 p-0.5 text-stone-500 hover:bg-white dark:border-slate-700 dark:text-slate-400"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quick Notes */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-600 dark:text-slate-300 mb-1">
+                      Nota rápida
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Anotação curta para revisão..."
+                      className="w-full rounded-xl border border-stone-200 bg-stone-50 p-2.5 text-xs text-stone-900 outline-hidden focus:border-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-900 dark:text-white resize-none"
+                    />
+                  </div>
                 </div>
               )}
-
-              {/* Progress bar */}
-              <div className="mt-4 h-2 w-full max-w-md overflow-hidden rounded-full bg-stone-200 dark:bg-stone-700">
-                <div
-                  className="h-full bg-indigo-600 dark:bg-indigo-500 rounded-full transition-all duration-300"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-
-              {/* Quick +5m, -5m, +15m adjustments */}
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => adjustMinutes(-5)}
-                  className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 shadow-2xs"
-                  title="Diminuir 5 minutos"
-                >
-                  -5m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => adjustMinutes(5)}
-                  className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 shadow-2xs"
-                  title="Adicionar 5 minutos"
-                >
-                  +5m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => adjustMinutes(15)}
-                  className="rounded-lg border border-stone-200 bg-white px-2.5 py-1 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 shadow-2xs"
-                  title="Adicionar 15 minutos"
-                >
-                  +15m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditHours(Math.floor(secondsRemaining / 3600));
-                    setEditMinutes(Math.floor((secondsRemaining % 3600) / 60));
-                    setIsEditingTime(true);
-                  }}
-                  className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-900 dark:bg-indigo-950/60 dark:text-indigo-300 shadow-2xs"
-                >
-                  Digitar Tempo (HH:MM)
-                </button>
-              </div>
-
-              {/* Play / Pause / Reset Controls */}
-              <div className="mt-5 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSecondsRemaining(totalSeconds)}
-                  className="flex h-11 w-11 items-center justify-center rounded-2xl border border-stone-300 bg-white text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 shadow-xs"
-                  title="Reiniciar cronômetro"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsActive(!isActive)}
-                  className={`flex items-center gap-2 rounded-2xl px-7 py-3 text-sm font-extrabold text-white shadow-md transition-all active:scale-95 ${
-                    isActive
-                      ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/30'
-                      : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30'
-                  }`}
-                >
-                  {isActive ? (
-                    <>
-                      <Pause className="h-5 w-5 fill-white" />
-                      <span>PAUSAR</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-5 w-5 fill-white" />
-                      <span>{secondsRemaining === totalSeconds ? 'INICIAR ESTUDO' : 'CONTINUAR'}</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleStartFinish}
-                  className="flex items-center gap-1.5 rounded-2xl bg-emerald-600 px-5 py-3 text-xs font-extrabold text-white shadow-md shadow-emerald-600/30 hover:bg-emerald-700 active:scale-95"
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>CONCLUIR</span>
-                </button>
-              </div>
             </div>
+          )}
 
-            {/* SPREADSHEET SYNC INPUTS: Onde Parou & Caderno de Questões */}
-            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 dark:border-indigo-950/60 dark:bg-indigo-950/20 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase tracking-wider text-indigo-950 dark:text-indigo-200">
-                  Atualizar Planilha Desta Matéria
-                </span>
-                <span className="text-[10px] text-stone-400">Salva ao concluir</span>
+          {/* STEP 2: UNIFIED 1-STEP COMPLETION SCREEN */}
+          {finishStep === 'summary' && (
+            <div className="py-2 space-y-4">
+              <div className="text-center space-y-1">
+                <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
+                  <CheckCircle2 className="h-6 w-6" />
+                </div>
+                <p className="text-base font-black text-stone-900 dark:text-white tabular-nums">
+                  {actualMinutes} min estudados em {task.subjectName}
+                </p>
+                <p className="text-xs text-stone-500 dark:text-slate-400">
+                  Confira ou ajuste os dados antes de salvar.
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-3 text-left">
                 <div>
-                  <label className="block text-[11px] font-bold text-stone-700 dark:text-stone-300 mb-1">
-                    📍 Onde Parou Agora (PAREI)
+                  <label className="flex items-center gap-1.5 text-[11px] font-bold text-stone-600 dark:text-slate-300 mb-1">
+                    <MapPin className="h-3 w-3 text-indigo-500 dark:text-cyan-400" />
+                    <span>Onde você parou (salva na planilha)</span>
                   </label>
                   <input
                     type="text"
                     value={pareiEmValue}
                     onChange={(e) => setPareiEmValue(e.target.value)}
-                    placeholder="Ex: aula 1.6 - morfologia..."
-                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+                    placeholder="Ex: aula 1.6 - vértice da parábola..."
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-900 outline-hidden focus:border-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:border-cyan-500"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-600 dark:text-slate-300 mb-1">
+                      Questões feitas
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={999}
+                      value={exercisesDone}
+                      onChange={(e) => {
+                        const val = Math.max(0, Number(e.target.value) || 0);
+                        setExercisesDone(val);
+                        setExercisesCorrect((prev) => Math.min(val, prev));
+                      }}
+                      className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold tabular-nums text-stone-900 outline-hidden focus:border-indigo-500 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-700 dark:text-emerald-400 mb-1">
+                      Acertos
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={exercisesDone}
+                      value={exercisesCorrect}
+                      onChange={(e) =>
+                        setExercisesCorrect(
+                          Math.min(exercisesDone, Math.max(0, Number(e.target.value) || 0))
+                        )
+                      }
+                      className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold tabular-nums text-emerald-700 outline-hidden focus:border-indigo-500 dark:border-slate-800 dark:bg-slate-900 dark:text-emerald-400"
+                    />
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-stone-700 dark:text-stone-300 mb-1">
-                    📝 Caderno de Questões
-                  </label>
-                  <input
-                    type="text"
-                    value={cadernoQuestoesValue}
-                    onChange={(e) => setCadernoQuestoesValue(e.target.value)}
-                    placeholder="Ex: questão 40 - ortográfica..."
-                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-semibold text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* SUBTOPICS CHECKLIST (From Subject Topics) */}
-            {matchedSubject && matchedSubject.topics.length > 0 && (
-              <div className="rounded-2xl border border-stone-200 bg-stone-50/60 p-4 dark:border-stone-800 dark:bg-stone-800/40 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300">
-                    Subtópicos da Matéria (Marque o que avançar)
+                  <span className="block text-[11px] font-bold text-stone-600 dark:text-slate-300 mb-1.5">
+                    Como foi o estudo?
                   </span>
-                  <span className="text-[10px] text-stone-400">
-                    {Object.values(checkedTopics).filter(Boolean).length}/{matchedSubject.topics.length}
-                  </span>
-                </div>
-                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                  {matchedSubject.topics.map((top) => {
-                    const isChecked = !!checkedTopics[top.id];
-                    return (
-                      <button
-                        key={top.id}
-                        type="button"
-                        onClick={() => toggleSubjectTopic(top.id)}
-                        className={`flex w-full items-center justify-between rounded-xl border p-2 text-left text-xs transition ${
-                          isChecked
-                            ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 font-semibold'
-                            : 'border-stone-200 bg-white text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-850 dark:text-stone-300'
-                        }`}
-                      >
-                        <span className={isChecked ? 'line-through opacity-80' : ''}>{top.name}</span>
-                        <div
-                          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-md border ${
-                            isChecked
-                              ? 'border-emerald-600 bg-emerald-600 text-white'
-                              : 'border-stone-300 dark:border-stone-600'
-                          }`}
-                        >
-                          {isChecked && <Check className="h-3 w-3 stroke-3" />}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* EXERCISES & NOTES */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Question counter */}
-              <div className="rounded-2xl border border-stone-200 bg-stone-50/60 p-4 dark:border-stone-800 dark:bg-stone-800/40">
-                <span className="text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 block mb-2">
-                  Questões Praticadas
-                </span>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white p-2 dark:border-stone-700 dark:bg-stone-850">
-                    <span className="text-xs text-stone-600 dark:text-stone-400">Total Feitas</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setExercisesDone(Math.max(0, exercisesDone - 1))}
-                        className="rounded-md border border-stone-200 p-1 text-stone-500 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800"
-                      >
-                        <Minus className="h-3 w-3" />
-                      </button>
-                      <span className="w-7 text-center font-bold text-stone-900 dark:text-stone-100">
-                        {exercisesDone}
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRating('dificil')}
+                      className={`rounded-xl border px-2.5 py-2 text-center transition ${
+                        selectedRating === 'dificil'
+                          ? 'border-rose-400 bg-rose-50 dark:border-rose-700 dark:bg-rose-950/60 ring-2 ring-rose-400/25'
+                          : 'border-stone-200 bg-white hover:bg-stone-50 dark:border-slate-800 dark:bg-slate-900'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold text-rose-700 dark:text-rose-300">
+                        Difícil
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => setExercisesDone(exercisesDone + 1)}
-                        className="rounded-md border border-stone-200 p-1 text-stone-500 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800"
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-white p-2 dark:border-stone-700 dark:bg-stone-850">
-                    <span className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">Acertos</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setExercisesCorrect(Math.max(0, exercisesCorrect - 1))}
-                        className="rounded-md border border-stone-200 p-1 text-stone-500 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800"
-                      >
-                        <Minus className="h-3 w-3" />
-                      </button>
-                      <span className="w-7 text-center font-bold text-emerald-700 dark:text-emerald-400">
-                        {exercisesCorrect}
+                      <span className="block text-[10px] text-stone-500 dark:text-slate-400">
+                        Revisar antes
                       </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExercisesCorrect(Math.min(exercisesDone, exercisesCorrect + 1))
-                        }
-                        className="rounded-md border border-stone-200 p-1 text-stone-500 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800"
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRating('medio')}
+                      className={`rounded-xl border px-2.5 py-2 text-center transition ${
+                        selectedRating === 'medio'
+                          ? 'border-amber-400 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/60 ring-2 ring-amber-400/25'
+                          : 'border-stone-200 bg-white hover:bg-stone-50 dark:border-slate-800 dark:bg-slate-900'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold text-amber-700 dark:text-amber-300">
+                        Médio
+                      </span>
+                      <span className="block text-[10px] text-stone-500 dark:text-slate-400">
+                        Ritmo bom
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRating('facil')}
+                      className={`rounded-xl border px-2.5 py-2 text-center transition ${
+                        selectedRating === 'facil'
+                          ? 'border-emerald-400 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/60 ring-2 ring-emerald-400/25'
+                          : 'border-stone-200 bg-white hover:bg-stone-50 dark:border-slate-800 dark:bg-slate-900'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                        Fácil
+                      </span>
+                      <span className="block text-[10px] text-stone-500 dark:text-slate-400">
+                        Dominado
+                      </span>
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* Quick Scratchpad */}
-              <div className="rounded-2xl border border-stone-200 bg-stone-50/60 p-4 dark:border-stone-800 dark:bg-stone-800/40">
-                <span className="text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 block mb-2">
-                  Rascunho de Dúvidas / Fórmulas
-                </span>
-                <textarea
-                  rows={3}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Anotações rápidas para a revisão..."
-                  className="w-full rounded-xl border border-stone-200 bg-white p-2.5 text-xs text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-850 dark:text-stone-100 resize-none"
-                />
+              {/* Optional Break Shortcut */}
+              <button
+                type="button"
+                onClick={handleStartManualBreak}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-950/50 transition"
+              >
+                <Coffee className="h-3.5 w-3.5" />
+                <span>Fazer pausa de {breakDurationMinutes} min antes</span>
+              </button>
+
+              {/* Final Footer Actions */}
+              <div className="flex items-center gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setFinishStep('active')}
+                  className="flex-1 rounded-full border border-stone-200 py-2.5 text-xs font-bold text-stone-600 hover:bg-stone-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmCompletion}
+                  className="flex-1 rounded-full bg-indigo-600 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-indigo-700 active:scale-95 transition"
+                >
+                  Salvar e Fechar
+                </button>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* STEP 2: RATING & CONFIRMATION */}
-        {finishStep === 'rating' && (
-          <div className="py-6 text-center space-y-4">
-            <h4 className="text-xl font-black text-stone-900 dark:text-stone-100">
-              Como foi a sessão de estudo?
-            </h4>
-            <p className="text-xs text-stone-500 dark:text-stone-400 max-w-md mx-auto">
-              Tempo registrado: <strong>{actualMinutes} minutos</strong> de estudo.
-              {pareiEmValue && <span> Parou em: <strong>{pareiEmValue}</strong>.</span>}
-            </p>
-
-            <div className="grid grid-cols-3 gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setSelectedRating('dificil')}
-                className={`rounded-2xl border p-4 text-left transition ${
-                  selectedRating === 'dificil'
-                    ? 'border-rose-400 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/60 ring-2 ring-rose-400/30'
-                    : 'border-stone-200 bg-white hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800'
-                }`}
-              >
-                <span className="block text-sm font-bold text-rose-800 dark:text-rose-300">Difícil</span>
-                <span className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 block">Tópico denso, preciso revisar logo</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedRating('medio')}
-                className={`rounded-2xl border p-4 text-left transition ${
-                  selectedRating === 'medio'
-                    ? 'border-amber-400 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60 ring-2 ring-amber-400/30'
-                    : 'border-stone-200 bg-white hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800'
-                }`}
-              >
-                <span className="block text-sm font-bold text-amber-800 dark:text-amber-300">Médio</span>
-                <span className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 block">Ritmo bom, absorvi o principal</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedRating('facil')}
-                className={`rounded-2xl border p-4 text-left transition ${
-                  selectedRating === 'facil'
-                    ? 'border-emerald-400 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/60 ring-2 ring-emerald-400/30'
-                    : 'border-stone-200 bg-white hover:bg-stone-50 dark:border-stone-700 dark:bg-stone-800'
-                }`}
-              >
-                <span className="block text-sm font-bold text-emerald-800 dark:text-emerald-300">Fácil</span>
-                <span className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 block">Conteúdo dominado com facilidade</span>
-              </button>
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button
-                type="button"
-                onClick={() => setFinishStep('active')}
-                className="flex-1 rounded-xl border border-stone-300 py-3 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800"
-              >
-                Voltar ao Cronômetro
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmCompletion}
-                className="flex-1 rounded-xl bg-indigo-600 py-3 text-xs font-extrabold text-white shadow-md hover:bg-indigo-700"
-              >
-                Gravar e Atualizar Planilha
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 3: REWARD SUMMARY */}
-        {finishStep === 'reward' && rewardData && (
-          <div className="py-8 text-center space-y-4">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 ring-4 ring-emerald-500/20">
-              <CheckCircle2 className="h-10 w-10" />
-            </div>
-
-            <div>
-              <h4 className="text-2xl font-black text-stone-900 dark:text-stone-100">
-                Sessão Registrada com Sucesso!
-              </h4>
-              <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-                Sua planilha e suas estatísticas de estudo foram atualizadas.
+          {/* OPTIONAL STEP: GREEN CIRCULAR BREAK RING */}
+          {finishStep === 'break' && (
+            <div className="flex flex-col items-center text-center py-2">
+              <p className="text-[11px] font-extrabold tracking-widest text-emerald-600 dark:text-emerald-400">
+                {breakSecondsRemaining === 0 ? 'PAUSA CONCLUÍDA' : 'INTERVALO'}
               </p>
-            </div>
 
-            <div className="inline-flex items-center gap-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 px-5 py-2.5 border border-indigo-200 dark:border-indigo-800">
-              <Sparkles className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-              <span className="text-base font-black text-indigo-950 dark:text-indigo-200">
-                +{rewardData.xpEarned} XP Conquistados!
-              </span>
-            </div>
+              <div className="relative my-5 flex items-center justify-center">
+                <svg
+                  width={ringSize}
+                  height={ringSize}
+                  viewBox={`0 0 ${ringSize} ${ringSize}`}
+                  className="-rotate-90 select-none"
+                >
+                  <circle
+                    cx={ringSize / 2}
+                    cy={ringSize / 2}
+                    r={radius}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={strokeWidth}
+                    className="text-emerald-100 dark:text-emerald-950/60"
+                  />
+                  <circle
+                    cx={ringSize / 2}
+                    cy={ringSize / 2}
+                    r={radius}
+                    fill="none"
+                    stroke="#10b981"
+                    strokeWidth={strokeWidth}
+                    strokeLinecap="round"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={breakDashOffset}
+                    className="transition-[stroke-dashoffset] duration-300 ease-out"
+                  />
+                </svg>
 
-            {pareiEmValue && (
-              <div className="rounded-xl bg-stone-50 dark:bg-stone-800 p-3 text-xs text-stone-700 dark:text-stone-300 max-w-sm mx-auto">
-                📍 Gravado na Planilha: <strong>{pareiEmValue}</strong>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="font-mono tabular-nums text-4xl font-black leading-none tracking-tight text-emerald-700 dark:text-emerald-300">
+                    {formatTimerClock(breakSecondsRemaining)}
+                  </span>
+                  <span className="mt-2 text-[10px] font-bold tracking-[0.2em] text-stone-400 dark:text-slate-500">
+                    DESCANSO
+                  </span>
+                </div>
               </div>
-            )}
 
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-xl bg-stone-900 px-7 py-3 text-xs font-bold text-white hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
-              >
-                Concluir e Voltar
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2.5">
+                {breakSecondsRemaining > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isBreakRunning) {
+                        const rem =
+                          breakEndTimestampRef.current !== null
+                            ? Math.max(
+                                0,
+                                Math.ceil((breakEndTimestampRef.current - Date.now()) / 1000)
+                              )
+                            : breakSecondsRemaining;
+                        breakEndTimestampRef.current = null;
+                        setBreakSecondsRemaining(rem);
+                        setIsBreakRunning(false);
+                      } else {
+                        breakEndTimestampRef.current = Date.now() + breakSecondsRemaining * 1000;
+                        setIsBreakRunning(true);
+                      }
+                    }}
+                    className="rounded-full border border-stone-200 bg-stone-50 px-5 py-2.5 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 transition"
+                  >
+                    {isBreakRunning ? 'Pausar pausa' : 'Retomar'}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    breakEndTimestampRef.current = null;
+                    setIsBreakRunning(false);
+                    setFinishStep('summary');
+                  }}
+                  className="rounded-full bg-indigo-600 px-6 py-2.5 text-xs font-extrabold text-white hover:bg-indigo-700 transition"
+                >
+                  {breakSecondsRemaining === 0 ? 'Concluir sessão' : 'Voltar para concluir'}
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

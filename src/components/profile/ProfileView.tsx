@@ -15,11 +15,18 @@ import {
   Sun,
   Moon,
   Monitor,
+  Shield,
+  KeyRound,
+  Zap,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { StudyProfileType } from '../../types';
+import { StudyProfileType, StudyMethodId } from '../../types';
 import { getLevelProgress } from '../../services/scheduleEngine';
-import { useTheme, ThemeMode } from '../../context/ThemeContext';
+import { StudyMethodPreset } from '../../services/studyMethods';
+import { StudyMethodSelector } from '../common/StudyMethodSelector';
+import { useTheme } from '../../context/ThemeContext';
+import { FixedScheduleModal } from '../schedule/FixedScheduleModal';
+import { LoginModal } from '../auth/LoginModal';
 
 interface ProfileViewProps {
   onOpenOnboarding: () => void;
@@ -44,11 +51,83 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
   const [targetTotalHours, setTargetTotalHours] = useState(profile.targetTotalHours || 200);
   const [dailyMinutes, setDailyMinutes] = useState(profile.dailyAvailableMinutes);
   const [sessionLength, setSessionLength] = useState(profile.preferredSessionLength);
+  const [breakLength, setBreakLength] = useState(profile.preferredBreakLength ?? 10);
+  const [studyMethod, setStudyMethod] = useState<StudyMethodId>(
+    profile.studyMethod || 'blocos_50_10'
+  );
   const [selectedDays, setSelectedDays] = useState<number[]>(profile.availableDays);
+
+  const formatMinutesToHM = (totalMins: number): string => {
+    const safe = Math.max(0, Math.round(totalMins));
+    const h = Math.floor(safe / 60);
+    const m = safe % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  };
+
+  const parseHMInput = (raw: string, finalize = false): number | null => {
+    const clean = raw.replace(/[^\d:]/g, '').trim();
+    if (!clean) return null;
+
+    if (clean.includes(':')) {
+      const [hStr, mStr = ''] = clean.split(':');
+      if (!finalize && mStr.length < 2) return null;
+      const h = parseInt(hStr || '0', 10);
+      const paddedM = mStr.length === 1 ? `${mStr}0` : mStr;
+      const m = parseInt(paddedM || '0', 10);
+      if (Number.isNaN(h) || Number.isNaN(m)) return null;
+      const clampedM = Math.min(59, Math.max(0, m));
+      const total = h * 60 + clampedM;
+      if (total <= 0) return null;
+      return Math.min(960, Math.max(15, total));
+    }
+
+    if (clean.length >= 3) {
+      if (!finalize) return null;
+      const h = parseInt(clean.slice(0, -2), 10);
+      const m = Math.min(59, parseInt(clean.slice(-2), 10));
+      if (Number.isNaN(h) || Number.isNaN(m)) return null;
+      const total = h * 60 + m;
+      return total > 0 ? Math.min(960, Math.max(15, total)) : null;
+    }
+
+    const h = parseInt(clean, 10);
+    if (Number.isNaN(h) || h <= 0) return null;
+    return Math.min(960, Math.max(15, h * 60));
+  };
+
+  const buildInitialDayMap = () => {
+    const map: Record<number, number> = {};
+    for (let i = 0; i < 7; i++) {
+      map[i] = profile.dailyMinutesByDay?.[i] ?? profile.dailyAvailableMinutes ?? 120;
+    }
+    return map;
+  };
+
+  const [dailyMinutesByDay, setDailyMinutesByDay] = useState<Record<number, number>>(
+    buildInitialDayMap
+  );
+  const [dayHoursInputs, setDayHoursInputs] = useState<Record<number, string>>(() => {
+    const initial = buildInitialDayMap();
+    return {
+      0: formatMinutesToHM(initial[0]),
+      1: formatMinutesToHM(initial[1]),
+      2: formatMinutesToHM(initial[2]),
+      3: formatMinutesToHM(initial[3]),
+      4: formatMinutesToHM(initial[4]),
+      5: formatMinutesToHM(initial[5]),
+      6: formatMinutesToHM(initial[6]),
+    };
+  });
+
   const [profileType, setProfileType] = useState<StudyProfileType>(profile.profileType);
 
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [importSuccess, setImportSuccess] = useState(false);
   const [importError, setImportError] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const [isFixedModalOpen, setIsFixedModalOpen] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   const levelProgress = getLevelProgress(profile.xp);
 
@@ -62,6 +141,35 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
     { label: 'Sáb', index: 6 },
   ];
 
+  const applyBaseMinutesToAllDays = (mins: number) => {
+    const safeMins = Math.min(960, Math.max(15, mins));
+    const map: Record<number, number> = {};
+    const inputs: Record<number, string> = {};
+    for (let i = 0; i < 7; i++) {
+      map[i] = safeMins;
+      inputs[i] = formatMinutesToHM(safeMins);
+    }
+    setDailyMinutes(safeMins);
+    setDailyMinutesByDay(map);
+    setDayHoursInputs(inputs);
+  };
+
+  const handleDayHoursChange = (dayIndex: number, rawValue: string) => {
+    const sanitized = rawValue.replace(/[^\d:]/g, '').slice(0, 5);
+    setDayHoursInputs((prev) => ({ ...prev, [dayIndex]: sanitized }));
+    const parsed = parseHMInput(sanitized, false);
+    if (parsed !== null) {
+      setDailyMinutesByDay((prev) => ({ ...prev, [dayIndex]: parsed }));
+    }
+  };
+
+  const handleDayHoursBlur = (dayIndex: number) => {
+    const parsed = parseHMInput(dayHoursInputs[dayIndex] || '', true);
+    const finalMins = parsed ?? dailyMinutesByDay[dayIndex] ?? dailyMinutes;
+    setDailyMinutesByDay((prev) => ({ ...prev, [dayIndex]: finalMins }));
+    setDayHoursInputs((prev) => ({ ...prev, [dayIndex]: formatMinutesToHM(finalMins) }));
+  };
+
   const toggleDay = (dayIndex: number) => {
     if (selectedDays.includes(dayIndex)) {
       if (selectedDays.length > 1) {
@@ -69,19 +177,49 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
       }
     } else {
       setSelectedDays([...selectedDays, dayIndex].sort());
+      if (!dailyMinutesByDay[dayIndex]) {
+        const fallback = Math.max(15, dailyMinutes);
+        setDailyMinutesByDay((prev) => ({ ...prev, [dayIndex]: fallback }));
+        setDayHoursInputs((prev) => ({ ...prev, [dayIndex]: formatMinutesToHM(fallback) }));
+      }
     }
   };
 
+  const weeklyTotalMinutes = selectedDays.reduce(
+    (sum, d) => sum + (dailyMinutesByDay[d] ?? dailyMinutes),
+    0
+  );
+  const weeklyHoursFormatted = formatMinutesToHM(weeklyTotalMinutes);
+  const allActiveMatchBase = selectedDays.every(
+    (d) => (dailyMinutesByDay[d] ?? dailyMinutes) === dailyMinutes
+  );
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    const activeMap: Partial<Record<number, number>> = {};
+    let totalActive = 0;
+    selectedDays.forEach((d) => {
+      const m = Math.max(15, dailyMinutesByDay[d] ?? dailyMinutes);
+      activeMap[d] = m;
+      totalActive += m;
+    });
+    const avgDailyMinutes = Math.max(
+      15,
+      Math.round(totalActive / Math.max(1, selectedDays.length))
+    );
+    setDailyMinutes(avgDailyMinutes);
+
     updateProfile({
       name: name.trim() || 'Estudante',
       objective: objective.trim(),
       targetExam: targetExam.trim(),
       examDate: hasExamDate ? (examDate || undefined) : undefined,
       targetTotalHours: !hasExamDate ? targetTotalHours : undefined,
-      dailyAvailableMinutes: dailyMinutes,
+      dailyAvailableMinutes: avgDailyMinutes,
+      dailyMinutesByDay: activeMap,
       preferredSessionLength: sessionLength,
+      preferredBreakLength: breakLength,
+      studyMethod,
       availableDays: selectedDays,
       profileType,
     });
@@ -95,7 +233,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `trilha-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `my-cronograma-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -111,7 +249,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
         setImportError(true);
         setTimeout(() => setImportError(false), 3000);
       } else {
-        alert('Dados importados com sucesso!');
+        setImportSuccess(true);
+        setTimeout(() => setImportSuccess(false), 3000);
       }
     };
     reader.readAsText(file);
@@ -151,74 +290,176 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
             Aparência & Tema
           </h3>
           <p className="text-xs text-stone-500 dark:text-stone-400">
-            Escolha como o Trilha deve ser exibido. Suas preferências são salvas automaticamente no seu navegador.
+            Escolha entre o estilo Gamer, Minimalista ou siga automaticamente as cores do seu sistema.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <button
-            type="button"
-            onClick={() => setTheme('light')}
-            className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition ${
-              theme === 'light'
-                ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-600/20 dark:bg-indigo-950/50'
-                : 'border-stone-200 bg-stone-50/50 hover:bg-stone-100 dark:border-stone-800 dark:bg-stone-800/40 dark:hover:bg-stone-800'
-            }`}
-          >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400">
-              <Sun className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="block text-sm font-bold text-stone-900 dark:text-stone-100">
-                Modo Claro
-              </span>
-              <span className="text-xs text-stone-500 dark:text-stone-400">
-                Visual limpo e luminoso
-              </span>
-            </div>
-          </button>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* 1. Gamer (Claro / Escuro) */}
+          {(() => {
+            const isGamerActive = theme === 'neon' || theme === 'neon-light';
+            return (
+              <div
+                onClick={() => {
+                  if (!isGamerActive) {
+                    setTheme(theme === 'light' ? 'neon-light' : 'neon');
+                  }
+                }}
+                className={`flex flex-col justify-between gap-3 rounded-2xl border p-4 text-left transition cursor-pointer ${
+                  isGamerActive
+                    ? 'border-cyan-500 bg-cyan-50/70 ring-2 ring-cyan-400/25 dark:border-cyan-400 dark:bg-cyan-950/35'
+                    : 'border-stone-200 bg-stone-50/50 hover:bg-stone-100 dark:border-stone-800 dark:bg-stone-800/40 dark:hover:bg-stone-800'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-100 text-cyan-600 border border-cyan-300/60 dark:bg-cyan-500/15 dark:text-cyan-400 dark:border-cyan-400/30">
+                    <Zap className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <span className="block text-sm font-bold text-stone-900 dark:text-stone-100">
+                      Gamer Neon
+                    </span>
+                    <span className="text-xs text-stone-500 dark:text-stone-400">
+                      Bordas e brilho ciano/roxo
+                    </span>
+                  </div>
+                </div>
 
-          <button
-            type="button"
-            onClick={() => setTheme('dark')}
-            className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition ${
-              theme === 'dark'
-                ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-600/20 dark:border-indigo-500 dark:bg-indigo-950/50'
-                : 'border-stone-200 bg-stone-50/50 hover:bg-stone-100 dark:border-stone-800 dark:bg-stone-800/40 dark:hover:bg-stone-800'
-            }`}
-          >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-900/60 dark:text-indigo-400">
-              <Moon className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="block text-sm font-bold text-stone-900 dark:text-stone-100">
-                Modo Escuro
-              </span>
-              <span className="text-xs text-stone-500 dark:text-stone-400">
-                Confortável para noites de estudo
-              </span>
-            </div>
-          </button>
+                <div
+                  className="grid grid-cols-2 gap-1.5 rounded-xl bg-stone-200/70 p-1 dark:bg-stone-900/80"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setTheme('neon-light')}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition ${
+                      theme === 'neon-light'
+                        ? 'bg-white text-cyan-700 shadow-xs ring-1 ring-cyan-400/60'
+                        : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200'
+                    }`}
+                  >
+                    <Sun className="h-3.5 w-3.5" />
+                    <span>Claro</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme('neon')}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition ${
+                      theme === 'neon'
+                        ? 'bg-stone-950 text-cyan-300 shadow-xs ring-1 ring-cyan-400/60'
+                        : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200'
+                    }`}
+                  >
+                    <Moon className="h-3.5 w-3.5" />
+                    <span>Escuro</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
+          {/* 2. Minimalista (Claro / Escuro) */}
+          {(() => {
+            const isMinimalActive = theme === 'light' || theme === 'dark';
+            return (
+              <div
+                onClick={() => {
+                  if (!isMinimalActive) {
+                    setTheme(theme === 'neon-light' ? 'light' : 'dark');
+                  }
+                }}
+                className={`flex flex-col justify-between gap-3 rounded-2xl border p-4 text-left transition cursor-pointer ${
+                  isMinimalActive
+                    ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-600/20 dark:border-indigo-500 dark:bg-indigo-950/50'
+                    : 'border-stone-200 bg-stone-50/50 hover:bg-stone-100 dark:border-stone-800 dark:bg-stone-800/40 dark:hover:bg-stone-800'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-900/60 dark:text-indigo-400">
+                    {theme === 'light' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                  </div>
+                  <div>
+                    <span className="block text-sm font-bold text-stone-900 dark:text-stone-100">
+                      Minimalista
+                    </span>
+                    <span className="text-xs text-stone-500 dark:text-stone-400">
+                      Visual limpo tradicional
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  className="grid grid-cols-2 gap-1.5 rounded-xl bg-stone-200/70 p-1 dark:bg-stone-900/80"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setTheme('light')}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition ${
+                      theme === 'light'
+                        ? 'bg-white text-indigo-700 shadow-xs ring-1 ring-indigo-500/40'
+                        : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200'
+                    }`}
+                  >
+                    <Sun className="h-3.5 w-3.5" />
+                    <span>Claro</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme('dark')}
+                    className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-bold transition ${
+                      theme === 'dark'
+                        ? 'bg-stone-900 text-indigo-300 shadow-xs ring-1 ring-indigo-500/50'
+                        : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200'
+                    }`}
+                  >
+                    <Moon className="h-3.5 w-3.5" />
+                    <span>Escuro</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 3. Sistema */}
           <button
             type="button"
             onClick={() => setTheme('system')}
-            className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition ${
+            className={`flex flex-col justify-between gap-3 rounded-2xl border p-4 text-left transition ${
               theme === 'system'
                 ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-600/20 dark:border-indigo-500 dark:bg-indigo-950/50'
                 : 'border-stone-200 bg-stone-50/50 hover:bg-stone-100 dark:border-stone-800 dark:bg-stone-800/40 dark:hover:bg-stone-800'
             }`}
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400">
-              <Monitor className="h-5 w-5" />
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400">
+                <Monitor className="h-5 w-5" />
+              </div>
+              <div>
+                <span className="block text-sm font-bold text-stone-900 dark:text-stone-100">
+                  Sistema
+                </span>
+                <span className="text-xs text-stone-500 dark:text-stone-400">
+                  Sincroniza com seu aparelho
+                </span>
+              </div>
             </div>
-            <div>
-              <span className="block text-sm font-bold text-stone-900 dark:text-stone-100">
-                Seguir Sistema
-              </span>
-              <span className="text-xs text-stone-500 dark:text-stone-400">
-                Sincroniza com seu aparelho
-              </span>
+
+            <div
+              className={`flex items-center justify-center gap-1.5 rounded-xl py-1.5 text-xs font-bold transition ${
+                theme === 'system'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-stone-200/70 text-stone-600 dark:bg-stone-900/80 dark:text-stone-400'
+              }`}
+            >
+              {theme === 'system' ? (
+                <>
+                  <Check className="h-3.5 w-3.5" />
+                  <span>Ativo</span>
+                </>
+              ) : (
+                <span>Seguir automático</span>
+              )}
             </div>
           </button>
         </div>
@@ -327,71 +568,107 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider">
-                Tempo Disponível por Dia
+                Tempo Padrão por Dia (Aplicar a todos)
               </label>
-              <span className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
-                {Math.floor(dailyMinutes / 60)}h {dailyMinutes % 60 > 0 ? `${dailyMinutes % 60}m` : ''}
+              <span className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400 tabular-nums">
+                Total: {weeklyHoursFormatted}/sem
               </span>
             </div>
-            <div className="grid grid-cols-4 gap-2">
-              {[60, 90, 120, 180].map((mins) => (
+            <div className="grid grid-cols-5 gap-2">
+              {[60, 90, 120, 180, 240].map((mins) => (
                 <button
                   key={mins}
                   type="button"
-                  onClick={() => setDailyMinutes(mins)}
-                  className={`py-2 rounded-xl text-xs font-bold border transition ${
-                    dailyMinutes === mins
+                  onClick={() => applyBaseMinutesToAllDays(mins)}
+                  className={`py-2 rounded-xl text-xs font-bold tabular-nums border transition ${
+                    allActiveMatchBase && dailyMinutes === mins
                       ? 'border-indigo-600 bg-indigo-600 text-white'
                       : 'border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750'
                   }`}
                 >
-                  {mins >= 60 ? `${mins / 60}h` : `${mins}m`}
+                  {formatMinutesToHM(mins)}
                 </button>
               ))}
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider mb-2">
-              Dias da Semana de Estudo
-            </label>
-            <div className="grid grid-cols-7 gap-1.5">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider">
+                Horas por Dia da Semana (H:M)
+              </label>
+              <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
+                Clique no dia para ativar/folga
+              </span>
+            </div>
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
               {weekDays.map((d) => {
                 const isChecked = selectedDays.includes(d.index);
                 return (
-                  <button
+                  <div
                     key={d.index}
-                    type="button"
-                    onClick={() => toggleDay(d.index)}
-                    className={`flex flex-col items-center justify-center py-2.5 rounded-xl border text-xs font-bold transition ${
+                    className={`flex flex-col rounded-xl border overflow-hidden transition ${
                       isChecked
-                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700 ring-2 ring-indigo-600/20 dark:border-indigo-500 dark:bg-indigo-950/60 dark:text-indigo-300 dark:ring-indigo-500/30'
-                        : 'border-stone-200 text-stone-400 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-500 dark:hover:bg-stone-800'
+                        ? 'border-indigo-600 bg-indigo-50/40 dark:border-indigo-500 dark:bg-indigo-950/30'
+                        : 'border-stone-200 bg-stone-50 opacity-75 dark:border-stone-800 dark:bg-stone-900/50'
                     }`}
                   >
-                    <span>{d.label}</span>
-                    <span className="text-[10px] mt-0.5">{isChecked ? '✓' : '—'}</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleDay(d.index)}
+                      className={`flex items-center justify-center gap-1 py-1.5 text-xs transition ${
+                        isChecked
+                          ? 'bg-indigo-600 text-white font-extrabold'
+                          : 'bg-stone-100 text-stone-500 font-semibold hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-400 dark:hover:bg-stone-700'
+                      }`}
+                    >
+                      <span>{d.label}</span>
+                      <span className="text-[10px]">{isChecked ? '✓' : '—'}</span>
+                    </button>
+
+                    <div className="p-1.5 flex items-center justify-center">
+                      {isChecked ? (
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={5}
+                          placeholder="02:00"
+                          aria-label={`Tempo disponível em ${d.label} (H:M)`}
+                          value={dayHoursInputs[d.index] ?? '02:00'}
+                          onChange={(e) => handleDayHoursChange(d.index, e.target.value)}
+                          onBlur={() => handleDayHoursBlur(d.index)}
+                          className="w-full min-w-0 rounded-lg border border-stone-300 bg-white px-1.5 py-1 text-center text-xs font-extrabold text-stone-900 tabular-nums outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => toggleDay(d.index)}
+                          className="w-full py-1 text-center text-[11px] font-medium text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
+                        >
+                          Folga
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider mb-1.5">
-              Duração Padrão do Bloco de Foco
-            </label>
-            <select
-              value={sessionLength}
-              onChange={(e) => setSessionLength(Number(e.target.value))}
-              className="w-full rounded-xl border border-stone-300 px-3.5 py-2 text-sm text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:focus:border-indigo-400"
-            >
-              <option value={25}>25 minutos (Pomodoro)</option>
-              <option value={45}>45 minutos</option>
-              <option value={50}>50 minutos (Recomendado)</option>
-              <option value={60}>60 minutos (Aprofundado)</option>
-            </select>
-          </div>
+          <StudyMethodSelector
+            studyMethod={studyMethod}
+            focusMinutes={sessionLength}
+            breakMinutes={breakLength}
+            onChangeMethod={(methodId, preset: StudyMethodPreset) => {
+              setStudyMethod(methodId);
+              if (methodId !== 'personalizado') {
+                setSessionLength(preset.focusMinutes);
+                setBreakLength(preset.breakMinutes);
+              }
+            }}
+            onChangeFocusMinutes={setSessionLength}
+            onChangeBreakMinutes={setBreakLength}
+          />
 
           <div className="pt-2 flex items-center justify-between">
             {saveSuccess ? (
@@ -420,7 +697,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
           Gerenciamento de Dados & Backup
         </h3>
         <p className="text-xs text-stone-500 dark:text-stone-400">
-          Seus dados são salvos com segurança de forma local e podem ser exportados a qualquer momento.
+          Seus dados ficam salvos automaticamente na sua conta e também podem ser exportados ou restaurados via arquivo JSON.
         </p>
 
         <div className="flex flex-wrap gap-3 pt-1">
@@ -453,28 +730,105 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
             <span>Refazer Onboarding Inicial</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (confirm('Tem certeza? Isso apagará todas as tarefas e matérias para você configurar do zero.')) {
-                resetAllData();
-                onOpenOnboarding();
-              }
-            }}
-            className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/70"
-          >
-            <RotateCcw className="h-4 w-4" />
-            <span>Resetar Todos os Dados</span>
-          </button>
+          {confirmReset ? (
+            <div className="flex items-center gap-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs dark:border-rose-900/60 dark:bg-rose-950/50">
+              <span className="font-bold text-rose-800 dark:text-rose-200">
+                Zerar matérias, XP e dias?
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  resetAllData();
+                  setConfirmReset(false);
+                  onOpenOnboarding();
+                }}
+                className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-rose-700"
+              >
+                Confirmar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmReset(false)}
+                className="rounded-lg px-2 py-1 text-[11px] font-semibold text-stone-600 hover:bg-stone-200 dark:text-stone-300 dark:hover:bg-stone-800"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmReset(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/70"
+            >
+              <RotateCcw className="h-4 w-4" />
+              <span>Resetar Todos os Dados</span>
+            </button>
+          )}
         </div>
+
+        {importSuccess && (
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-2">
+            <Check className="h-4 w-4" />
+            <span>Backup importado e restaurado com sucesso!</span>
+          </div>
+        )}
 
         {importError && (
           <div className="flex items-center gap-2 text-xs font-bold text-rose-600 dark:text-rose-400 mt-2">
             <AlertCircle className="h-4 w-4" />
-            <span>Arquivo inválido. Certifique-se de que é um backup do Trilha.</span>
+            <span>Arquivo inválido. Certifique-se de que é um backup do my cronograma.</span>
           </div>
         )}
       </div>
+
+      {/* Account & Fixed Schedule Card */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-xs space-y-4 dark:border-stone-800 dark:bg-stone-900">
+        <div>
+          <h3 className="text-base font-extrabold text-stone-900 dark:text-stone-100 flex items-center gap-2">
+            <Shield className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+            <span>Minha Conta &amp; Grade Fixa</span>
+          </h3>
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
+            Gerencie sua conta de acesso e bloqueie horários fixos de trabalho ou faculdade
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => setIsFixedModalOpen(true)}
+            className="flex flex-col items-start gap-1 rounded-xl border border-stone-200 bg-stone-50 p-4 text-left hover:bg-stone-100 dark:border-stone-800 dark:bg-stone-800/60 transition"
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className="font-extrabold text-xs text-stone-900 dark:text-stone-100">Grade Fixa</span>
+              <Shield className="h-4 w-4 text-indigo-500" />
+            </div>
+            <span className="text-[11px] text-stone-500 dark:text-stone-400">Bloquear trabalho / faculdade</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsLoginModalOpen(true)}
+            className="flex flex-col items-start gap-1 rounded-xl border border-stone-200 bg-stone-50 p-4 text-left hover:bg-stone-100 dark:border-stone-800 dark:bg-stone-800/60 transition"
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className="font-extrabold text-xs text-stone-900 dark:text-stone-100">Minha Conta</span>
+              <KeyRound className="h-4 w-4 text-indigo-500" />
+            </div>
+            <span className="text-[11px] text-stone-500 dark:text-stone-400">Dados de acesso e sessão</span>
+          </button>
+        </div>
+      </div>
+
+      <FixedScheduleModal
+        isOpen={isFixedModalOpen}
+        onClose={() => setIsFixedModalOpen(false)}
+      />
+
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+      />
     </div>
   );
 };

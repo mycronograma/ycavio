@@ -13,9 +13,13 @@ import { useStudy } from '../../context/StudyContext';
 import { getTodayStr } from '../../services/scheduleEngine';
 import { SpacedReview } from '../../types';
 
-export const ReviewsView: React.FC = () => {
+interface ReviewsViewProps {
+  onNavigateToSubjects?: () => void;
+}
+
+export const ReviewsView: React.FC<ReviewsViewProps> = ({ onNavigateToSubjects }) => {
   const { state, completeSpacedReview } = useStudy();
-  const { reviews } = state;
+  const { reviews, subjects } = state;
 
   const todayStr = getTodayStr();
   const [filterTab, setFilterTab] = useState<'hoje' | 'proximas' | 'concluidas'>('hoje');
@@ -53,6 +57,32 @@ export const ReviewsView: React.FC = () => {
         return { label: 'D+30 (1 mês)', color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' };
     }
   };
+
+  if (subjects.length === 0) {
+    return (
+      <div className="space-y-6 pb-12">
+        <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-10 text-center dark:border-stone-700 dark:bg-stone-900">
+          <RotateCw className="mx-auto h-10 w-10 text-indigo-500 mb-3" />
+          <h3 className="text-lg font-extrabold text-stone-900 dark:text-stone-100">
+            Nenhuma revisão programada ainda
+          </h3>
+          <p className="mt-1.5 text-xs text-stone-500 dark:text-stone-400 max-w-md mx-auto leading-relaxed">
+            Suas revisões espaçadas (D+1, D+7, D+15, D+30) são geradas automaticamente após concluir blocos de estudo. Comece escolhendo um preset ou criando suas matérias.
+          </p>
+          {onNavigateToSubjects && (
+            <button
+              type="button"
+              onClick={onNavigateToSubjects}
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition"
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>Escolher Preset ou Adicionar Matérias</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12">
@@ -109,7 +139,7 @@ export const ReviewsView: React.FC = () => {
           <Sparkles className="h-5 w-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
           <div className="text-xs text-indigo-950 dark:text-indigo-200">
             <span className="font-bold block text-indigo-900 dark:text-indigo-300">
-              Como funciona a Repetição Espaçada no Trilha:
+              Como funciona a Repetição Espaçada no my cronograma:
             </span>
             Sempre que você conclui uma sessão de estudos, o sistema gera ciclos automáticos de revisão.
             Revisar nos momentos certos interrompe o esquecimento e transfere os conceitos da memória recente para a memória permanente.

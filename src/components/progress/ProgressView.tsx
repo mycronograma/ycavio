@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   BarChart3,
   Clock,
@@ -11,13 +11,17 @@ import {
   Calendar,
   Check,
   Zap,
+  Plus,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { getTodayStr, getLevelProgress } from '../../services/scheduleEngine';
+import { ActivityHeatmap } from '../analytics/ActivityHeatmap';
+import { QuestionLogModal } from '../analytics/QuestionLogModal';
 
 export const ProgressView: React.FC = () => {
   const { state } = useStudy();
-  const { subjects, sessions, profile, tasks } = state;
+  const { subjects, sessions, profile, tasks, questionLogs } = state;
+  const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false);
 
   const totalMinutesStudied = subjects.reduce((acc, s) => acc + s.totalMinutesStudied, 0);
   const totalHours = (totalMinutesStudied / 60).toFixed(1);
@@ -84,6 +88,13 @@ export const ProgressView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsQuestionModalOpen(true)}
+            className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 active:scale-95 transition"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Registrar Questões</span>
+          </button>
           <span className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-bold text-stone-700 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">
             Nível {levelProgress.currentLevel} • {levelProgress.title}
           </span>
@@ -149,6 +160,9 @@ export const ProgressView: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* Activity Heatmap (GitHub-Style) */}
+      <ActivityHeatmap sessions={sessions} weeks={14} />
 
       {/* Main Graph & Radar Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -353,6 +367,91 @@ export const ProgressView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Caderno de Questões (Question Logs History) */}
+      <div className="rounded-2xl border border-stone-200 bg-white p-6 shadow-xs dark:border-stone-800 dark:bg-stone-900">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h3 className="text-base font-extrabold text-stone-900 dark:text-stone-100 flex items-center gap-2">
+              <Target className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+              <span>Registros do Caderno de Questões</span>
+            </h3>
+            <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+              Histórico de listas e simulados resolvidos para acompanhamento da sua evolução
+            </p>
+          </div>
+
+          <button
+            onClick={() => setIsQuestionModalOpen(true)}
+            className="flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-900/50 dark:bg-indigo-950/40 dark:text-indigo-300 transition"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Adicionar Registro</span>
+          </button>
+        </div>
+
+        {(!questionLogs || questionLogs.length === 0) ? (
+          <div className="py-8 text-center text-xs text-stone-400 border border-dashed border-stone-200 rounded-xl dark:border-stone-800">
+            Nenhum registro de questões feito ainda. Clique em "Adicionar Registro" para começar.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-stone-200 dark:border-stone-800 text-[11px] font-bold uppercase tracking-wider text-stone-400 dark:text-stone-500">
+                  <th className="pb-3">Data</th>
+                  <th className="pb-3">Matéria & Assunto</th>
+                  <th className="pb-3">Tipo</th>
+                  <th className="pb-3">Questões</th>
+                  <th className="pb-3">Acertos</th>
+                  <th className="pb-3 text-right">Aproveitamento</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100 dark:divide-stone-800 text-stone-700 dark:text-stone-300">
+                {questionLogs.map((q) => {
+                  const pct = Math.round((q.correctAnswers / q.totalQuestions) * 100);
+                  return (
+                    <tr key={q.id} className="hover:bg-stone-50 dark:hover:bg-stone-800/40">
+                      <td className="py-3 font-mono text-stone-500 dark:text-stone-400">{q.date}</td>
+                      <td className="py-3">
+                        <div className="font-bold text-stone-900 dark:text-stone-100">{q.subjectName || 'Geral'}</div>
+                        {q.topicName && <div className="text-stone-500 dark:text-stone-400 text-[11px]">{q.topicName}</div>}
+                        {q.notes && <div className="text-[10px] text-stone-400 italic mt-0.5">{q.notes}</div>}
+                      </td>
+                      <td className="py-3">
+                        <span className="rounded-md bg-stone-100 dark:bg-stone-800 px-2 py-0.5 text-[10px] font-bold text-stone-700 dark:text-stone-300">
+                          {q.sessionType === 'SIMULADO' ? 'Simulado' : 'Exercícios'}
+                        </span>
+                      </td>
+                      <td className="py-3 font-semibold text-stone-800 dark:text-stone-200">{q.totalQuestions}</td>
+                      <td className="py-3 font-semibold text-stone-800 dark:text-stone-200">{q.correctAnswers}</td>
+                      <td className="py-3 text-right">
+                        <span
+                          className={`inline-block rounded-md px-2 py-0.5 font-black text-xs ${
+                            pct >= 75
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                              : pct >= 50
+                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                              : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                          }`}
+                        >
+                          {pct}%
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Question Log Modal */}
+      <QuestionLogModal
+        isOpen={isQuestionModalOpen}
+        onClose={() => setIsQuestionModalOpen(false)}
+      />
     </div>
   );
 };

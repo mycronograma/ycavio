@@ -1,14 +1,11 @@
-import { AppState, Subject, Achievement, UserProfile, StudyProfileType } from '../types';
-import { getTodayStr, addDays, generateSmartSchedule } from './scheduleEngine';
+import { AppState, Subject, Achievement, UserProfile, UserAccount, DailyGoal, StudySession, Task, ActiveTimerDraft } from '../types';
+import { getTodayStr } from './scheduleEngine';
+import { isValidStudyMethodId } from './studyMethods';
 
-const STORAGE_KEY = 'trilha_estudos_app_v1';
-
-export interface PresetGoal {
+export interface PresetModule {
   id: string;
   name: string;
-  category: string;
   description: string;
-  defaultExamOffsetDays: number;
   subjects: Array<{
     name: string;
     color: string;
@@ -19,159 +16,940 @@ export interface PresetGoal {
   }>;
 }
 
+export interface PresetGoal {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  defaultExamOffsetDays: number;
+  weeklyHoursByLoad: {
+    leve: string;
+    normal: string;
+    intensivo: string;
+  };
+  subjects: Array<{
+    name: string;
+    color: string;
+    weight: number;
+    difficulty: 'baixa' | 'media' | 'alta';
+    knowledgeLevel: 'iniciante' | 'intermediario' | 'avancado';
+    topics: string[];
+  }>;
+  modules?: PresetModule[];
+}
+
 export const STUDY_PRESETS: PresetGoal[] = [
   {
     id: 'enem',
-    name: 'ENEM & Vestibulares',
+    name: 'ENEM',
     category: 'Vestibular',
-    description: 'Focado nas 4 áreas do conhecimento e Redação nota 1000',
+    description: 'Todas as disciplinas das 4 áreas oficiais do ENEM e Redação, com idiomas e complementares opcionais',
     defaultExamOffsetDays: 120,
+    weeklyHoursByLoad: {
+      leve: '17:30/sem',
+      normal: '25:00/sem',
+      intensivo: '36:00/sem',
+    },
     subjects: [
       {
-        name: 'Matemática & Suas Tecnologias',
-        color: '#3b82f6', // blue
+        name: 'Matemática',
+        color: '#3b82f6',
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: ['Funções & Gráficos', 'Geometria Espacial', 'Probabilidade & Estatística', 'Razão e Proporção', 'Trigonometria'],
+        topics: [],
       },
       {
         name: 'Redação',
-        color: '#ec4899', // pink
+        color: '#ec4899',
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: ['Estrutura Dissertativa', 'Repertório Sociocultural', 'Proposta de Intervenção (5 Elementos)', 'Coesão & Conectivos'],
+        topics: [],
       },
       {
-        name: 'Física',
-        color: '#8b5cf6', // purple
-        weight: 4,
-        difficulty: 'alta',
-        knowledgeLevel: 'iniciante',
-        topics: ['Cinemática & Dinâmica', 'Circuitos Elétricos', 'Termodinâmica', 'Ondulatória & Óptica'],
-      },
-      {
-        name: 'Biologia',
-        color: '#10b981', // emerald
+        name: 'Língua Portuguesa',
+        color: '#6366f1',
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: ['Ecologia & Biomas', 'Genética Mendeliana', 'Citologia & Bioenergética', 'Fisiologia Humana'],
+        topics: [],
       },
       {
-        name: 'História & Filosofia',
-        color: '#f59e0b', // amber
-        weight: 3,
-        difficulty: 'media',
-        knowledgeLevel: 'avancado',
-        topics: ['Brasil Colônia e Império', 'Ditadura Militar', 'Filosofia Política & Iluminismo', 'Cidadania & Direitos'],
-      },
-      {
-        name: 'Linguagens & Literatura',
-        color: '#06b6d4', // cyan
+        name: 'Literatura',
+        color: '#f43f5e',
         weight: 3,
         difficulty: 'baixa',
-        knowledgeLevel: 'avancado',
-        topics: ['Interpretação de Texto', 'Figuras de Linguagem', 'Gêneros Textuais', 'Modernismo Brasileiro'],
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Artes',
+        color: '#d946ef',
+        weight: 2,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Física',
+        color: '#8b5cf6',
+        weight: 4,
+        difficulty: 'alta',
+        knowledgeLevel: 'iniciante',
+        topics: [],
+      },
+      {
+        name: 'Química',
+        color: '#06b6d4',
+        weight: 4,
+        difficulty: 'alta',
+        knowledgeLevel: 'iniciante',
+        topics: [],
+      },
+      {
+        name: 'Biologia',
+        color: '#10b981',
+        weight: 4,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'História',
+        color: '#f59e0b',
+        weight: 3,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Geografia',
+        color: '#14b8a6',
+        weight: 3,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Filosofia',
+        color: '#a855f7',
+        weight: 3,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Sociologia',
+        color: '#7c3aed',
+        weight: 3,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+    ],
+    modules: [
+      {
+        id: 'mod_enem_ingles',
+        name: 'Idioma: Inglês',
+        description: '5 questões de Língua Inglesa na prova de Linguagens',
+        subjects: [
+          {
+            name: 'Inglês',
+            color: '#0ea5e9',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_enem_espanhol',
+        name: 'Idioma: Espanhol',
+        description: '5 questões de Língua Espanhola na prova de Linguagens',
+        subjects: [
+          {
+            name: 'Espanhol',
+            color: '#f97316',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_enem_ed_fisica',
+        name: 'Educação Física & TICs',
+        description: 'Cultura corporal, esportes e tecnologias da comunicação',
+        subjects: [
+          {
+            name: 'Educação Física & TICs',
+            color: '#22c55e',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'avancado',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_enem_atualidades',
+        name: 'Atualidades & Repertório',
+        description: 'Eixos temáticos atuais para Redação e Ciências Humanas',
+        subjects: [
+          {
+            name: 'Atualidades & Repertório',
+            color: '#eab308',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'medicina',
+    name: 'Medicina',
+    category: 'Vestibular',
+    description: 'Grade completa para alta nota de corte em Medicina, com Natureza e Redação em peso máximo + opcionais',
+    defaultExamOffsetDays: 150,
+    weeklyHoursByLoad: {
+      leve: '23:30/sem',
+      normal: '32:00/sem',
+      intensivo: '44:00/sem',
+    },
+    subjects: [
+      {
+        name: 'Biologia (Foco Med)',
+        color: '#10b981',
+        weight: 5,
+        difficulty: 'alta',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Química (Foco Med)',
+        color: '#06b6d4',
+        weight: 5,
+        difficulty: 'alta',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Física',
+        color: '#8b5cf6',
+        weight: 5,
+        difficulty: 'alta',
+        knowledgeLevel: 'iniciante',
+        topics: [],
+      },
+      {
+        name: 'Matemática',
+        color: '#3b82f6',
+        weight: 5,
+        difficulty: 'alta',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Redação Nota 1000',
+        color: '#ec4899',
+        weight: 5,
+        difficulty: 'alta',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Português & Interpretação',
+        color: '#6366f1',
+        weight: 3,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Literatura',
+        color: '#f43f5e',
+        weight: 3,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'História',
+        color: '#f59e0b',
+        weight: 3,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Geografia',
+        color: '#14b8a6',
+        weight: 3,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Filosofia',
+        color: '#a855f7',
+        weight: 2,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Sociologia',
+        color: '#7c3aed',
+        weight: 2,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Artes',
+        color: '#d946ef',
+        weight: 2,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+    ],
+    modules: [
+      {
+        id: 'mod_med_ingles',
+        name: 'Idioma: Inglês',
+        description: 'Interpretação de textos em inglês para vestibulares e ENEM',
+        subjects: [
+          {
+            name: 'Inglês',
+            color: '#0ea5e9',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_med_espanhol',
+        name: 'Idioma: Espanhol',
+        description: 'Opção de língua espanhola para prova de Linguagens',
+        subjects: [
+          {
+            name: 'Espanhol',
+            color: '#f97316',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_med_2fase',
+        name: '2ª Fase Discursiva & Obras',
+        description: 'Treino discursivo (Bio/Quím/Fís) e obras literárias obrigatórias',
+        subjects: [
+          {
+            name: 'Questões Discursivas (Natureza)',
+            color: '#e11d48',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Obras Literárias Obrigatórias',
+            color: '#fb7185',
+            weight: 3,
+            difficulty: 'media',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_med_saude',
+        name: 'Atualidades em Saúde & SUS',
+        description: 'Bioética, epidemiologia e saúde coletiva para redação e discursivas',
+        subjects: [
+          {
+            name: 'Atualidades em Saúde & SUS',
+            color: '#059669',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
       },
     ],
   },
   {
     id: 'concurso_geral',
-    name: 'Concursos Públicos (Geral / Fiscal)',
+    name: 'Concursos Públicos',
     category: 'Concurso',
-    description: 'Estrutura padrão para carreiras administrativas, tribunais e fiscais',
+    description: 'Base comum obrigatória de concursos + 8 módulos opcionais por carreira (DF, Federal, Tribunais, Fiscal, Policial, Bancária, INSS e Educação)',
     defaultExamOffsetDays: 90,
+    weeklyHoursByLoad: {
+      leve: '21:30/sem',
+      normal: '28:00/sem',
+      intensivo: '38:00/sem',
+    },
     subjects: [
       {
+        name: 'Língua Portuguesa',
+        color: '#10b981',
+        weight: 5,
+        difficulty: 'alta',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
         name: 'Direito Constitucional',
-        color: '#6366f1', // indigo
+        color: '#6366f1',
         weight: 5,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: ['Direitos e Garantias Fundamentais', 'Organização do Estado', 'Poder Executivo e Legislativo', 'Controle de Constitucionalidade'],
+        topics: [],
       },
       {
         name: 'Direito Administrativo',
-        color: '#0ea5e9', // sky
+        color: '#0ea5e9',
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: ['Atos Administrativos', 'Licitações & Contratos (Lei 14.133)', 'Poderes Administrativos', 'Responsabilidade Civil do Estado'],
+        topics: [],
       },
       {
-        name: 'Língua Portuguesa',
-        color: '#10b981', // emerald
-        weight: 5,
-        difficulty: 'alta',
-        knowledgeLevel: 'iniciante',
-        topics: ['Sintaxe de Concordância e Regência', 'Pontuação e Crase', 'Interpretação e Tipologia', 'Ortografia e Acentuação'],
-      },
-      {
-        name: 'Raciocínio Lógico & Mat.',
-        color: '#f97316', // orange
+        name: 'Raciocínio Lógico',
+        color: '#f97316',
         weight: 4,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: ['Lógica de Proposições', 'Tabelas-Verdade & Equivalências', 'Análise Combinatória', 'Diagramas Lógicos'],
+        topics: [],
+      },
+      {
+        name: 'Matemática',
+        color: '#fb923c',
+        weight: 3,
+        difficulty: 'media',
+        knowledgeLevel: 'iniciante',
+        topics: [],
       },
       {
         name: 'Informática para Concursos',
-        color: '#14b8a6', // teal
+        color: '#14b8a6',
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: ['Segurança da Informação & Malware', 'Redes & Computação em Nuvem', 'Suíte Office / LibreOffice', 'Sistemas Operacionais'],
+        topics: [],
+      },
+      {
+        name: 'Ética no Serviço Público',
+        color: '#a855f7',
+        weight: 2,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Atualidades & Redação Oficial',
+        color: '#8b5cf6',
+        weight: 3,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
       },
     ],
+    modules: [
+      {
+        id: 'mod_df',
+        name: 'Distrito Federal (DF)',
+        description: 'LODF, LC 840/2011 e Conhecimentos sobre o DF (RIDE)',
+        subjects: [
+          {
+            name: 'Lei Orgânica do DF (LODF)',
+            color: '#ec4899',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Regime Jurídico (LC 840/2011)',
+            color: '#f43f5e',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Conhecimentos sobre o DF (RIDE)',
+            color: '#f59e0b',
+            weight: 3,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_federal',
+        name: 'Executivo Federal',
+        description: 'Lei 8.112/90 e Administração Pública & Políticas Públicas',
+        subjects: [
+          {
+            name: 'Lei 8.112/90 (Regime Jurídico Federal)',
+            color: '#4f46e5',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Administração Pública & Políticas Públicas',
+            color: '#0284c7',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_tribunais',
+        name: 'Tribunais & Jurídica',
+        description: 'Civil, Processual Civil, Penal, Processual Penal e Eleitoral',
+        subjects: [
+          {
+            name: 'Direito Civil',
+            color: '#3b82f6',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Direito Processual Civil',
+            color: '#2563eb',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Direito Penal',
+            color: '#8b5cf6',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Direito Processual Penal',
+            color: '#7c3aed',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Direito Eleitoral',
+            color: '#06b6d4',
+            weight: 3,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_fiscal',
+        name: 'Área Fiscal & Controle',
+        description: 'Tributário, Contabilidade Geral, AFO/Financeiro e Auditoria',
+        subjects: [
+          {
+            name: 'Direito Tributário',
+            color: '#0ea5e9',
+            weight: 5,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Contabilidade Geral & Avançada',
+            color: '#10b981',
+            weight: 5,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'AFO & Direito Financeiro',
+            color: '#059669',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Auditoria Governamental e Privada',
+            color: '#0d9488',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_policial',
+        name: 'Carreiras Policiais',
+        description: 'Legislação Penal Especial, Medicina Legal, Contabilidade, Estatística e CTB',
+        subjects: [
+          {
+            name: 'Legislação Penal Especial',
+            color: '#ef4444',
+            weight: 5,
+            difficulty: 'media',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Medicina Legal & Criminalística',
+            color: '#dc2626',
+            weight: 3,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Contabilidade para Polícia',
+            color: '#16a34a',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Estatística',
+            color: '#ea580c',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Legislação de Trânsito (CTB)',
+            color: '#d97706',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_bancaria',
+        name: 'Carreira Bancária',
+        description: 'Conhecimentos Bancários, Matemática Financeira, Vendas e Mercado',
+        subjects: [
+          {
+            name: 'Conhecimentos Bancários',
+            color: '#0ea5e9',
+            weight: 5,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Matemática Financeira',
+            color: '#f97316',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Vendas & Negociação',
+            color: '#ec4899',
+            weight: 4,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Atualidades do Mercado Financeiro',
+            color: '#8b5cf6',
+            weight: 3,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_inss',
+        name: 'INSS & Seguridade Social',
+        description: 'Direito Previdenciário e custeio/benefícios da Seguridade',
+        subjects: [
+          {
+            name: 'Direito Previdenciário & Seguridade',
+            color: '#06b6d4',
+            weight: 5,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_educacao',
+        name: 'Educação & Pedagogia',
+        description: 'LDB, Didática, BNCC e Estatuto da Criança e do Adolescente',
+        subjects: [
+          {
+            name: 'LDB & Legislação Educacional',
+            color: '#10b981',
+            weight: 5,
+            difficulty: 'media',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Didática, Currículo & BNCC',
+            color: '#6366f1',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'ECA (Estatuto da Criança e Adolescente)',
+            color: '#f59e0b',
+            weight: 3,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'personalizado',
+    name: 'Personalizado',
+    category: 'Livre',
+    description: 'Crie suas próprias disciplinas e tópicos do zero com total controle',
+    defaultExamOffsetDays: 90,
+    weeklyHoursByLoad: {
+      leve: 'Livre',
+      normal: 'Livre',
+      intensivo: 'Livre',
+    },
+    subjects: [],
   },
   {
     id: 'oab',
     name: 'Exame de Ordem (OAB 1ª Fase)',
     category: 'Certificação',
-    description: 'Disciplinas estratégicas com maior peso para garantir os 40 pontos',
+    description: 'Núcleo obrigatório principal da FGV + 3 módulos opcionais que completam todas as 20 disciplinas oficiais',
     defaultExamOffsetDays: 75,
+    weeklyHoursByLoad: {
+      leve: '16:00/sem',
+      normal: '24:00/sem',
+      intensivo: '34:00/sem',
+    },
     subjects: [
       {
-        name: 'Ética Profissional & Estatuto',
-        color: '#ef4444', // red
+        name: 'Ética Profissional & Estatuto da OAB',
+        color: '#ef4444',
         weight: 5,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: ['Direitos do Advogado', 'Infrações e Sanções Disciplinares', 'Honorários Advocatícios', 'Sociedade de Advogados'],
-      },
-      {
-        name: 'Direito Civil & Processo Civil',
-        color: '#3b82f6',
-        weight: 5,
-        difficulty: 'alta',
-        knowledgeLevel: 'intermediario',
-        topics: ['Contratos e Obrigações', 'Tutelas Provisórias', 'Recursos no CPC', 'Responsabilidade Civil'],
-      },
-      {
-        name: 'Direito Penal & Processo Penal',
-        color: '#8b5cf6',
-        weight: 4,
-        difficulty: 'media',
-        knowledgeLevel: 'iniciante',
-        topics: ['Teoria do Crime & Ilicitude', 'Prisão e Liberdade Provisória', 'Crimes Contra o Patrimônio', 'Ação Penal'],
-      },
-      {
-        name: 'Direito do Trabalho & Processual',
-        color: '#f59e0b',
-        weight: 4,
-        difficulty: 'media',
-        knowledgeLevel: 'intermediario',
-        topics: ['Rescisão do Contrato de Trabalho', 'Jornada e Horas Extras', 'Recursos Trabalhistas', 'Audiência Trabalhista'],
+        topics: [],
       },
       {
         name: 'Direito Constitucional',
         color: '#10b981',
+        weight: 5,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Direito Administrativo',
+        color: '#0ea5e9',
+        weight: 5,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Direito Civil',
+        color: '#3b82f6',
+        weight: 5,
+        difficulty: 'alta',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Processo Civil',
+        color: '#2563eb',
+        weight: 5,
+        difficulty: 'alta',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Direito Penal',
+        color: '#8b5cf6',
         weight: 4,
         difficulty: 'media',
-        knowledgeLevel: 'avancado',
-        topics: ['Remédios Constitucionais', 'Ações de Controle Concentrado', 'Processo Legislativo'],
+        knowledgeLevel: 'iniciante',
+        topics: [],
+      },
+      {
+        name: 'Processo Penal',
+        color: '#7c3aed',
+        weight: 4,
+        difficulty: 'media',
+        knowledgeLevel: 'iniciante',
+        topics: [],
+      },
+      {
+        name: 'Direito do Trabalho',
+        color: '#f59e0b',
+        weight: 4,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Processo do Trabalho',
+        color: '#d97706',
+        weight: 4,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Direito Tributário',
+        color: '#06b6d4',
+        weight: 4,
+        difficulty: 'alta',
+        knowledgeLevel: 'iniciante',
+        topics: [],
+      },
+      {
+        name: 'Direito Empresarial',
+        color: '#14b8a6',
+        weight: 3,
+        difficulty: 'alta',
+        knowledgeLevel: 'iniciante',
+        topics: [],
+      },
+    ],
+    modules: [
+      {
+        id: 'mod_oab_humanos_filo',
+        name: 'Humanos, Internacional & Filosofia',
+        description: 'Direitos Humanos, Direito Internacional e Filosofia do Direito',
+        subjects: [
+          {
+            name: 'Direitos Humanos',
+            color: '#ec4899',
+            weight: 3,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Direito Internacional',
+            color: '#6366f1',
+            weight: 2,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Filosofia do Direito',
+            color: '#a855f7',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_oab_difusos',
+        name: 'Estatutos & Direitos Difusos',
+        description: 'Consumidor, ECA e Direito Ambiental (alto retorno em tiro curto)',
+        subjects: [
+          {
+            name: 'Direito do Consumidor',
+            color: '#f97316',
+            weight: 3,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Estatuto da Criança e do Adolescente (ECA)',
+            color: '#22c55e',
+            weight: 3,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+          {
+            name: 'Direito Ambiental',
+            color: '#16a34a',
+            weight: 2,
+            difficulty: 'baixa',
+            knowledgeLevel: 'intermediario',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_oab_novas',
+        name: 'Novas Disciplinas OAB (FGV)',
+        description: 'Direito Eleitoral, Previdenciário e Financeiro',
+        subjects: [
+          {
+            name: 'Direito Eleitoral',
+            color: '#0284c7',
+            weight: 2,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Direito Previdenciário',
+            color: '#0d9488',
+            weight: 2,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Direito Financeiro',
+            color: '#ca8a04',
+            weight: 2,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+        ],
       },
     ],
   },
@@ -179,40 +957,155 @@ export const STUDY_PRESETS: PresetGoal[] = [
     id: 'dev_tech',
     name: 'Tecnologia & Programação',
     category: 'Carreira Tech',
-    description: 'Do básico a algoritmos, arquitetura e engenharia de software',
+    description: 'Base completa de engenharia de software + 4 trilhas opcionais (Cloud, Dados/IA, Mobile e Cibersegurança)',
     defaultExamOffsetDays: 180,
+    weeklyHoursByLoad: {
+      leve: '12:00/sem',
+      normal: '20:00/sem',
+      intensivo: '30:00/sem',
+    },
     subjects: [
+      {
+        name: 'Lógica de Programação & Fundamentos',
+        color: '#3b82f6',
+        weight: 5,
+        difficulty: 'media',
+        knowledgeLevel: 'iniciante',
+        topics: [],
+      },
       {
         name: 'Estrutura de Dados & Algoritmos',
         color: '#6366f1',
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: ['Arrays, Pilhas e Filas', 'Árvores Binárias & Busca', 'Complexidade Big-O', 'Algoritmos de Ordenação'],
+        topics: [],
       },
       {
-        name: 'Engenharia de Software & Bancos',
+        name: 'Banco de Dados & SQL',
         color: '#0ea5e9',
-        weight: 4,
+        weight: 5,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: ['Modelagem Relacional & SQL', 'Design Patterns (GoF)', 'APIs RESTful & Clean Code', 'Git & CI/CD'],
+        topics: [],
       },
       {
-        name: 'Frontend Moderno',
+        name: 'Backend & APIs',
+        color: '#8b5cf6',
+        weight: 5,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Frontend & Web Moderna',
         color: '#10b981',
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: ['React Hooks & Estado', 'TypeScript Avançado', 'Tailwind & UI Responsiva', 'Testes Automatizados'],
+        topics: [],
+      },
+      {
+        name: 'Engenharia de Software & Testes (QA)',
+        color: '#06b6d4',
+        weight: 4,
+        difficulty: 'media',
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+      {
+        name: 'Git, Linux & Redes',
+        color: '#14b8a6',
+        weight: 3,
+        difficulty: 'baixa',
+        knowledgeLevel: 'intermediario',
+        topics: [],
       },
       {
         name: 'Inglês Técnico',
         color: '#f59e0b',
         weight: 3,
         difficulty: 'baixa',
-        knowledgeLevel: 'avancado',
-        topics: ['Leitura de Documentação', 'Vocabulário de Arquitetura', 'Simulação de Entrevistas'],
+        knowledgeLevel: 'intermediario',
+        topics: [],
+      },
+    ],
+    modules: [
+      {
+        id: 'mod_tech_cloud',
+        name: 'Cloud, Docker & DevOps',
+        description: 'Containers, Kubernetes, infraestrutura em nuvem e CI/CD',
+        subjects: [
+          {
+            name: 'Docker, Containers & Kubernetes',
+            color: '#0284c7',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Cloud Computing & CI/CD',
+            color: '#4f46e5',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_tech_dados_ia',
+        name: 'Dados, Python & IA',
+        description: 'Python para análise de dados, Machine Learning e IA aplicada',
+        subjects: [
+          {
+            name: 'Python para Ciência de Dados',
+            color: '#16a34a',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+          {
+            name: 'Machine Learning & IA Aplicada',
+            color: '#a855f7',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_tech_mobile',
+        name: 'Desenvolvimento Mobile',
+        description: 'Aplicativos iOS/Android com React Native, Flutter ou nativo',
+        subjects: [
+          {
+            name: 'Desenvolvimento Mobile',
+            color: '#ec4899',
+            weight: 4,
+            difficulty: 'media',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+        ],
+      },
+      {
+        id: 'mod_tech_sec',
+        name: 'Cibersegurança',
+        description: 'Segurança de aplicações web, autenticação e redes',
+        subjects: [
+          {
+            name: 'Segurança de Aplicações & Redes',
+            color: '#ef4444',
+            weight: 4,
+            difficulty: 'alta',
+            knowledgeLevel: 'iniciante',
+            topics: [],
+          },
+        ],
       },
     ],
   },
@@ -298,202 +1191,336 @@ export const INITIAL_ACHIEVEMENTS: Achievement[] = [
   },
 ];
 
-export function createDefaultState(): AppState {
-  const todayStr = getTodayStr();
-  const defaultPreset = STUDY_PRESETS[0]; // ENEM
-  const examDate = addDays(todayStr, defaultPreset.defaultExamOffsetDays);
+const STORAGE_PREFIX = 'trilha_estudos_v2';
+const LAST_LOCAL_SESSION_KEY = `${STORAGE_PREFIX}_local_active`;
 
-  const profile: UserProfile = {
-    name: 'Estudante Focado',
-    objective: defaultPreset.name,
-    targetExam: 'ENEM 2026',
-    examDate: examDate,
-    profileType: 'vestibulando',
-    dailyAvailableMinutes: 120, // 2h/day
-    availableDays: [1, 2, 3, 4, 5], // Seg a Sex
-    preferredSessionLength: 50,
-    xp: 220,
-    level: 2,
-    streakDays: 1,
-    lastActiveDate: todayStr,
-    freezeStreakCount: 1,
-    onboardingCompleted: true,
-    createdAt: todayStr,
-  };
+export function getStorageKeyForUser(userId?: string): string {
+  const safeId = userId && userId.trim() ? userId.trim() : 'guest';
+  return `${STORAGE_PREFIX}_${safeId}`;
+}
 
-  const subjects: Subject[] = defaultPreset.subjects.map((s: any, idx) => ({
-    ciclo: s.ciclo ?? 0,
-    revisaoNotes: s.revisaoNotes ?? '',
-    cadernoQuestoes: s.cadernoQuestoes ?? '',
-    pareiEm: s.pareiEm ?? '',
-    concluida: s.concluida ?? false,
-    id: `sub-${idx + 1}`,
-    name: s.name,
-    color: s.color,
-    weight: s.weight,
-    difficulty: s.difficulty,
-    knowledgeLevel: s.knowledgeLevel,
-    topics: s.topics.map((tName, tIdx) => ({
-      id: `top-${idx + 1}-${tIdx + 1}`,
-      name: tName,
-      completed: tIdx === 0 && idx === 0, // 1 sample topic completed
-      completedAt: tIdx === 0 && idx === 0 ? todayStr : undefined,
-      exercisesCount: tIdx === 0 && idx === 0 ? 10 : 0,
-      exercisesCorrect: tIdx === 0 && idx === 0 ? 8 : 0,
-    })),
-    totalMinutesStudied: idx === 0 ? 50 : 0,
-    lastStudiedAt: idx === 0 ? todayStr : undefined,
-    completedTasksCount: idx === 0 ? 1 : 0,
-    totalExercisesDone: idx === 0 ? 10 : 0,
-    totalExercisesCorrect: idx === 0 ? 8 : 0,
-  }));
-
-  const reviews = [
-    {
-      id: 'rev-sample-1',
-      subjectId: 'sub-1',
-      subjectName: 'Matemática & Suas Tecnologias',
-      subjectColor: '#3b82f6',
-      topicName: 'Funções & Gráficos',
-      step: 1,
-      dueDate: addDays(todayStr, 1),
-      status: 'pendente' as const,
-      lastStudiedDate: todayStr,
-    },
-  ];
-
-  const tasks = generateSmartSchedule(profile, subjects, reviews, [], 7);
-
-  // Set the first task of today as completed to provide a clean realistic state
-  const todayTasks = tasks.filter((t) => t.date === todayStr);
-  if (todayTasks.length > 0) {
-    todayTasks[0].status = 'concluida';
-    todayTasks[0].completedAt = new Date().toISOString();
-    todayTasks[0].actualDurationMinutes = 50;
-    todayTasks[0].exercisesDone = 10;
-    todayTasks[0].exercisesCorrect = 8;
+export function hasActiveLocalGuestSession(): boolean {
+  try {
+    return localStorage.getItem(LAST_LOCAL_SESSION_KEY) === '1';
+  } catch {
+    return false;
   }
+}
 
-  const sessions = [
-    {
-      id: 'sess-init-1',
-      subjectId: 'sub-1',
-      subjectName: 'Matemática & Suas Tecnologias',
-      topicName: 'Funções & Gráficos',
-      type: 'teoria' as const,
-      durationMinutes: 50,
-      date: todayStr,
-      exercisesDone: 10,
-      exercisesCorrect: 8,
-      xpEarned: 110,
-      notes: 'Entendi bem o vértice da parábola e raízes da função quadrática.',
-    },
-  ];
+export function setActiveLocalGuestSession(active: boolean): void {
+  try {
+    if (active) {
+      localStorage.setItem(LAST_LOCAL_SESSION_KEY, '1');
+    } else {
+      localStorage.removeItem(LAST_LOCAL_SESSION_KEY);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function rolloverDailyGoalIfNeeded(
+  dailyGoal: Partial<DailyGoal> | undefined,
+  todayStr: string,
+  sessions: StudySession[] = [],
+  tasks: Task[] = [],
+  fallbackTargetMinutes = 120,
+  fallbackTargetTasks = 2
+): DailyGoal {
+  const safeMinutesTarget =
+    typeof dailyGoal?.targetMinutes === 'number' && dailyGoal.targetMinutes >= 15
+      ? Math.round(dailyGoal.targetMinutes)
+      : fallbackTargetMinutes;
+  const safeTasksTarget =
+    typeof dailyGoal?.targetTasks === 'number' && dailyGoal.targetTasks >= 1
+      ? Math.round(dailyGoal.targetTasks)
+      : fallbackTargetTasks;
+  const safeQuestionsTarget =
+    typeof dailyGoal?.targetQuestions === 'number' && dailyGoal.targetQuestions >= 1
+      ? Math.round(dailyGoal.targetQuestions)
+      : 30;
+
+  const rawCustomGoals = Array.isArray(dailyGoal?.customGoals) ? dailyGoal.customGoals : [];
+  const needsReset = dailyGoal?.lastResetDate !== todayStr;
+
+  const nextCustomGoals = needsReset
+    ? rawCustomGoals
+        .filter((item) => item && typeof item.title === 'string' && (item.recurringDaily || item.createdDate === todayStr))
+        .map((item) => ({
+          ...item,
+          completed: item.createdDate === todayStr ? Boolean(item.completed) : false,
+        }))
+    : rawCustomGoals;
+
+  const completedMinutesToday = sessions
+    .filter((s) => typeof s.date === 'string' && s.date.slice(0, 10) === todayStr)
+    .reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+
+  const completedTasksToday = tasks.filter(
+    (t) => t.date === todayStr && t.status === 'concluida'
+  ).length;
 
   return {
-    profile,
-    subjects,
-    tasks,
-    reviews,
-    sessions,
-    achievements: INITIAL_ACHIEVEMENTS.map((a) =>
-      a.id === 'first_step' ? { ...a, unlocked: true, progress: 1, unlockedAt: todayStr } : a
-    ),
-    dailyGoal: {
-      targetMinutes: 100,
-      targetTasks: 2,
-      completedMinutes: 50,
-      completedTasks: 1,
-    },
-    lastScheduleGeneratedAt: new Date().toISOString(),
+    targetMinutes: safeMinutesTarget,
+    targetTasks: safeTasksTarget,
+    targetQuestions: safeQuestionsTarget,
+    completedMinutes:
+      sessions.length > 0 || needsReset
+        ? completedMinutesToday
+        : typeof dailyGoal?.completedMinutes === 'number'
+        ? dailyGoal.completedMinutes
+        : 0,
+    completedTasks:
+      tasks.length > 0 || needsReset
+        ? completedTasksToday
+        : typeof dailyGoal?.completedTasks === 'number'
+        ? dailyGoal.completedTasks
+        : 0,
+    lastResetDate: todayStr,
+    customGoals: nextCustomGoals,
   };
 }
 
-export function loadStoredState(): AppState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      const defaultState = createDefaultState();
-      saveStoredState(defaultState);
-      return defaultState;
-    }
-    const parsed = JSON.parse(raw) as AppState;
-    if (parsed && Array.isArray(parsed.tasks)) {
-      // Clean up any duplicate task IDs that may have been saved to localStorage
-      const seenIds = new Set<string>();
-      parsed.tasks = parsed.tasks.map((task, idx) => {
+export function createDefaultState(userOverride?: UserAccount): AppState {
+  const todayStr = getTodayStr();
+  const isLogged = Boolean(userOverride?.isLoggedIn);
+
+  const profile: UserProfile = {
+    name: userOverride?.name || '',
+    email: userOverride?.email || '',
+    avatarSeed: userOverride?.avatarSeed,
+    objective: '',
+    targetExam: '',
+    profileType: 'iniciante',
+    dailyAvailableMinutes: 120,
+    dailyMinutesByDay: {
+      1: 120,
+      2: 120,
+      3: 120,
+      4: 120,
+      5: 120,
+    },
+    availableDays: [1, 2, 3, 4, 5],
+    preferredSessionLength: 50,
+    preferredBreakLength: 10,
+    studyMethod: 'blocos_50_10',
+    xp: 0,
+    level: 1,
+    streakDays: 0,
+    freezeStreakCount: 1,
+    onboardingCompleted: false,
+    presetChosen: false,
+    weeklyLoad: 'leve',
+    createdAt: todayStr,
+  };
+
+  return {
+    profile,
+    subjects: [],
+    tasks: [],
+    reviews: [],
+    sessions: [],
+    achievements: INITIAL_ACHIEVEMENTS.map((a) => ({ ...a })),
+    dailyGoal: {
+      targetMinutes: 120,
+      targetTasks: 2,
+      targetQuestions: 30,
+      completedMinutes: 0,
+      completedTasks: 0,
+      lastResetDate: todayStr,
+      customGoals: [],
+    },
+    questionLogs: [],
+    fixedCommitments: [],
+    notifications: [],
+    currentUser: userOverride || {
+      id: '',
+      name: '',
+      email: '',
+      isLoggedIn: isLogged,
+    },
+  };
+}
+
+export function normalizeAppState(
+  raw: Omit<Partial<AppState>, 'profile'> & { profile?: Partial<UserProfile> },
+  userOverride?: UserAccount
+): AppState {
+  const base = createDefaultState(userOverride);
+  const parsed = raw || {};
+
+  const seenIds = new Set<string>();
+  const tasks = Array.isArray(parsed.tasks)
+    ? parsed.tasks.map((task, idx) => {
         if (seenIds.has(task.id)) {
           const uniqueId = `${task.id}-dup-${idx}-${Math.random().toString(36).slice(2, 6)}`;
           return { ...task, id: uniqueId };
         }
         seenIds.add(task.id);
         return task;
-      });
-    }
-    // Basic schema check
-    if (parsed && Array.isArray(parsed.subjects)) {
-      parsed.subjects = parsed.subjects.map((sub: any) => ({
+      })
+    : [];
+
+  const subjects: Subject[] = Array.isArray(parsed.subjects)
+    ? parsed.subjects.map((sub: any) => ({
         ...sub,
         ciclo: sub.ciclo !== undefined ? sub.ciclo : 0,
         revisaoNotes: sub.revisaoNotes || '',
         cadernoQuestoes: sub.cadernoQuestoes || '',
         pareiEm: sub.pareiEm || '',
-        concluida: !!sub.concluida,
-      }));
+        concluida: Boolean(sub.concluida),
+        topics: Array.isArray(sub.topics) ? sub.topics : [],
+      }))
+    : [];
+
+  const profile: UserProfile = {
+    ...base.profile,
+    ...(parsed.profile || {}),
+    preferredSessionLength:
+      typeof parsed.profile?.preferredSessionLength === 'number' &&
+      parsed.profile.preferredSessionLength >= 10
+        ? Math.min(240, Math.round(parsed.profile.preferredSessionLength))
+        : base.profile.preferredSessionLength,
+    preferredBreakLength:
+      typeof parsed.profile?.preferredBreakLength === 'number' &&
+      parsed.profile.preferredBreakLength >= 1
+        ? Math.min(60, Math.round(parsed.profile.preferredBreakLength))
+        : base.profile.preferredBreakLength,
+    studyMethod: isValidStudyMethodId(parsed.profile?.studyMethod)
+      ? parsed.profile.studyMethod
+      : base.profile.studyMethod,
+    xp: typeof parsed.profile?.xp === 'number' ? parsed.profile.xp : 0,
+    level: typeof parsed.profile?.level === 'number' ? parsed.profile.level : 1,
+    streakDays: typeof parsed.profile?.streakDays === 'number' ? parsed.profile.streakDays : 0,
+    availableDays:
+      Array.isArray(parsed.profile?.availableDays) && parsed.profile.availableDays.length > 0
+        ? parsed.profile.availableDays
+        : base.profile.availableDays,
+  };
+
+  const todayStr = getTodayStr();
+  const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+
+  return {
+    profile,
+    subjects,
+    tasks,
+    reviews: Array.isArray(parsed.reviews) ? parsed.reviews : [],
+    sessions,
+    achievements:
+      Array.isArray(parsed.achievements) && parsed.achievements.length > 0
+        ? parsed.achievements
+        : base.achievements,
+    dailyGoal: rolloverDailyGoalIfNeeded(
+      parsed.dailyGoal,
+      todayStr,
+      sessions,
+      tasks,
+      base.dailyGoal.targetMinutes,
+      base.dailyGoal.targetTasks
+    ),
+    lastScheduleGeneratedAt: parsed.lastScheduleGeneratedAt,
+    questionLogs: Array.isArray(parsed.questionLogs) ? parsed.questionLogs : [],
+    fixedCommitments: Array.isArray(parsed.fixedCommitments) ? parsed.fixedCommitments : [],
+    notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
+    currentUser: userOverride || parsed.currentUser || base.currentUser,
+  };
+}
+
+export function loadStoredState(userId?: string): AppState {
+  try {
+    if (!userId && !hasActiveLocalGuestSession()) {
+      return createDefaultState();
     }
-    if (!parsed.profile || !parsed.subjects || !parsed.tasks) {
-      const fallback = createDefaultState();
-      saveStoredState(fallback);
-      return fallback;
+
+    const storageKey = getStorageKeyForUser(userId || 'local-guest');
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) {
+      return createDefaultState(
+        userId === 'local-guest'
+          ? {
+              id: 'local-guest',
+              name: 'Estudante Local',
+              email: '',
+              isLoggedIn: true,
+              role: 'Modo Local',
+            }
+          : undefined
+      );
     }
-    return parsed;
+    const parsed = JSON.parse(raw) as Partial<AppState>;
+    return normalizeAppState(parsed);
   } catch (err) {
-    console.warn('Error loading from localStorage, using fresh state', err);
+    console.warn('Error loading from localStorage, using zeroed state', err);
     return createDefaultState();
   }
 }
 
-export function saveStoredState(state: AppState): void {
+export function saveStoredState(state: AppState, userId?: string): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const resolvedId = userId || state.currentUser?.id;
+    if (!resolvedId) return;
+    localStorage.setItem(getStorageKeyForUser(resolvedId), JSON.stringify(state));
   } catch (err) {
     console.error('Failed to persist to localStorage', err);
   }
 }
 
-export function resetAppToOnboarding(): AppState {
-  const todayStr = getTodayStr();
-  const freshProfile: UserProfile = {
-    name: '',
-    objective: '',
-    targetExam: '',
-    profileType: 'iniciante',
-    dailyAvailableMinutes: 120,
-    availableDays: [1, 2, 3, 4, 5],
-    preferredSessionLength: 50,
-    xp: 0,
-    level: 1,
-    streakDays: 0,
-    freezeStreakCount: 1,
-    onboardingCompleted: false,
-    createdAt: todayStr,
-  };
+export function getActiveTimerDraftKey(userId?: string): string {
+  return `${getStorageKeyForUser(userId || 'local-guest')}_active_timer`;
+}
 
-  const emptyState: AppState = {
-    profile: freshProfile,
-    subjects: [],
-    tasks: [],
-    reviews: [],
-    sessions: [],
-    achievements: INITIAL_ACHIEVEMENTS,
-    dailyGoal: {
-      targetMinutes: 100,
-      targetTasks: 2,
-      completedMinutes: 0,
-      completedTasks: 0,
-    },
-  };
+export function loadActiveTimerDraft(userId?: string): ActiveTimerDraft | null {
+  try {
+    if (!userId && !hasActiveLocalGuestSession()) {
+      return null;
+    }
+    const raw = localStorage.getItem(getActiveTimerDraftKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ActiveTimerDraft>;
+    if (!parsed || !parsed.task || typeof parsed.secondsRemaining !== 'number' || typeof parsed.totalSeconds !== 'number') {
+      return null;
+    }
+    return {
+      task: parsed.task,
+      totalSeconds: Math.max(60, parsed.totalSeconds),
+      secondsRemaining: Math.max(0, Math.min(parsed.totalSeconds, parsed.secondsRemaining)),
+      // Always restore as paused when returning after closing tab/app
+      isRunning: false,
+      pareiEm: typeof parsed.pareiEm === 'string' ? parsed.pareiEm : '',
+      cadernoQuestoes: typeof parsed.cadernoQuestoes === 'string' ? parsed.cadernoQuestoes : '',
+      exercisesDone: typeof parsed.exercisesDone === 'number' ? Math.max(0, parsed.exercisesDone) : 0,
+      exercisesCorrect: typeof parsed.exercisesCorrect === 'number' ? Math.max(0, parsed.exercisesCorrect) : 0,
+      notes: typeof parsed.notes === 'string' ? parsed.notes : '',
+      updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
 
-  saveStoredState(emptyState);
+export function saveActiveTimerDraft(draft: ActiveTimerDraft | null, userId?: string): void {
+  try {
+    const key = getActiveTimerDraftKey(userId);
+    if (!draft) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, JSON.stringify(draft));
+    }
+  } catch (err) {
+    console.error('Failed to persist active timer draft', err);
+  }
+}
+
+export function resetAppToOnboarding(preserveUser?: UserAccount): AppState {
+  const emptyState = createDefaultState(
+    preserveUser?.isLoggedIn
+      ? preserveUser
+      : undefined
+  );
+  if (preserveUser?.id) {
+    saveStoredState(emptyState, preserveUser.id);
+    saveActiveTimerDraft(null, preserveUser.id);
+  }
   return emptyState;
 }

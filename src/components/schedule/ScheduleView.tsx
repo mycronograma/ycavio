@@ -11,14 +11,29 @@ import {
   Sparkles,
   Layers,
   Filter,
+  Shield,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { getTodayStr, addDays, formatDate } from '../../services/scheduleEngine';
-import { Task } from '../../types';
+import {
+  getTodayStr,
+  addDays,
+  getDailyCommitmentConflicts,
+} from '../../services/scheduleEngine';
+import { getStudyMethodPreset, resolveBreakMinutes } from '../../services/studyMethods';
+import { formatTimerClock } from '../study/ActiveStudyModal';
 
-export const ScheduleView: React.FC = () => {
-  const { state, startStudySession, recalculateSchedule } = useStudy();
-  const { tasks, profile } = state;
+interface ScheduleViewProps {
+  onNavigateToSubjects?: () => void;
+  onOpenFixedSchedule?: () => void;
+}
+
+export const ScheduleView: React.FC<ScheduleViewProps> = ({
+  onNavigateToSubjects,
+  onOpenFixedSchedule,
+}) => {
+  const { state, activeTimerDraft, startStudySession, resumePausedTimer, recalculateSchedule } =
+    useStudy();
+  const { tasks, profile, subjects, fixedCommitments } = state;
 
   const todayStr = getTodayStr();
 
@@ -34,6 +49,10 @@ export const ScheduleView: React.FC = () => {
       setIsRecalculating(false);
     }, 450);
   };
+
+  const conflicts = getDailyCommitmentConflicts(profile, fixedCommitments || []);
+  const methodPreset = getStudyMethodPreset(profile.studyMethod);
+  const breakMinutes = resolveBreakMinutes(profile);
 
   // Generate 7 days range starting from today
   const weekDays = Array.from({ length: 7 }).map((_, i) => {
@@ -62,6 +81,32 @@ export const ScheduleView: React.FC = () => {
     (t) => t.date < todayStr && (t.status === 'pendente' || t.status === 'atrasada')
   );
 
+  if (subjects.length === 0) {
+    return (
+      <div className="space-y-6 pb-12">
+        <div className="rounded-2xl border border-dashed border-stone-300 bg-white p-10 text-center dark:border-stone-700 dark:bg-stone-900">
+          <CalendarIcon className="mx-auto h-10 w-10 text-indigo-500 mb-3" />
+          <h3 className="text-lg font-extrabold text-stone-900 dark:text-stone-100">
+            Nenhum cronograma gerado ainda
+          </h3>
+          <p className="mt-1.5 text-xs text-stone-500 dark:text-stone-400 max-w-md mx-auto">
+            Escolha um preset ou adicione suas matérias primeiro para distribuirmos seus blocos na semana de acordo com suas horas em H:M.
+          </p>
+          {onNavigateToSubjects && (
+            <button
+              type="button"
+              onClick={onNavigateToSubjects}
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition"
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>Configurar Matérias &amp; Preset</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header bar */}
@@ -72,16 +117,18 @@ export const ScheduleView: React.FC = () => {
             <span>Cronograma Inteligente de Estudos</span>
           </h2>
           <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
-            Distribuição ponderada por peso do conteúdo, curva do esquecimento e seu histórico
+            Método ativo: <strong className="text-stone-700 dark:text-stone-200">{methodPreset.shortName}</strong> • Blocos de{' '}
+            <strong className="tabular-nums text-stone-700 dark:text-stone-200">{profile.preferredSessionLength || 50} min</strong> com pausa de{' '}
+            <strong className="tabular-nums text-emerald-600 dark:text-emerald-400">{breakMinutes} min</strong>
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Day / Week toggle */}
           <div className="flex rounded-xl border border-stone-200 bg-stone-100 p-1 text-xs font-semibold dark:border-stone-800 dark:bg-stone-800/80">
             <button
               onClick={() => setViewMode('week')}
-              className={`rounded-lg px-3 py-1 transition ${
+              className={`rounded-lg px-3 py-1 transition whitespace-nowrap shrink-0 ${
                 viewMode === 'week'
                   ? 'bg-white text-indigo-900 shadow-xs font-bold dark:bg-stone-900 dark:text-indigo-300'
                   : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200'
@@ -91,7 +138,7 @@ export const ScheduleView: React.FC = () => {
             </button>
             <button
               onClick={() => setViewMode('day')}
-              className={`rounded-lg px-3 py-1 transition ${
+              className={`rounded-lg px-3 py-1 transition whitespace-nowrap shrink-0 ${
                 viewMode === 'day'
                   ? 'bg-white text-indigo-900 shadow-xs font-bold dark:bg-stone-900 dark:text-indigo-300'
                   : 'text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200'
@@ -101,17 +148,41 @@ export const ScheduleView: React.FC = () => {
             </button>
           </div>
 
+          {onOpenFixedSchedule && (
+            <button
+              type="button"
+              onClick={onOpenFixedSchedule}
+              className="flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-xs font-bold text-stone-700 hover:bg-stone-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 transition whitespace-nowrap shrink-0"
+            >
+              <Shield className="h-3.5 w-3.5 text-indigo-600 dark:text-cyan-400" />
+              <span>Grade Fixa</span>
+            </button>
+          )}
+
           {/* Recalculate button */}
           <button
             onClick={handleRecalculate}
             disabled={isRecalculating}
-            className="flex items-center gap-1.5 rounded-xl bg-stone-900 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-stone-800 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white"
+            className="flex items-center gap-1.5 rounded-xl bg-stone-900 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-stone-800 disabled:opacity-50 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-white whitespace-nowrap shrink-0"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isRecalculating ? 'animate-spin' : ''}`} />
             <span>Recalcular</span>
           </button>
         </div>
       </div>
+
+      {/* Fixed Commitment Conflict Alert */}
+      {conflicts.length > 0 && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
+          <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="text-xs text-amber-900 dark:text-amber-200">
+            <span className="font-bold block">
+              Ajuste automático pela Grade Fixa ativo
+            </span>
+            Em {conflicts.map((c) => c.dayLabel).join(', ')}, sua meta de estudo ultrapassava o tempo livre após trabalho/compromissos fixos e foi limitada ao tempo útil disponível no dia.
+          </div>
+        </div>
+      )}
 
       {/* Overdue alert if any */}
       {overdueTasks.length > 0 && (
@@ -219,12 +290,16 @@ export const ScheduleView: React.FC = () => {
                       <div className="space-y-2.5">
                         {dayTasks.map((t, tIdx) => {
                           const isDone = t.status === 'concluida';
+                          const isDraftTask = activeTimerDraft?.task.id === t.id;
+                          const isPausedTask = isDraftTask || t.status === 'em_andamento';
                           return (
                             <div
                               key={`${t.id}-${tIdx}`}
                               className={`rounded-xl border p-3 transition ${
                                 isDone
                                   ? 'border-stone-200 bg-stone-50/60 opacity-75 dark:border-stone-800 dark:bg-stone-800/40'
+                                  : isPausedTask
+                                  ? 'border-amber-300 bg-amber-50/40 dark:border-amber-700/70 dark:bg-amber-950/20'
                                   : 'border-stone-200 bg-white hover:border-indigo-300 dark:border-stone-800 dark:bg-stone-900/90 dark:hover:border-indigo-700'
                               }`}
                             >
@@ -238,8 +313,16 @@ export const ScheduleView: React.FC = () => {
                                     {t.subjectName}
                                   </span>
                                 </div>
-                                <span className="text-[10px] font-semibold text-stone-400 dark:text-stone-500">
-                                  ⏱ {t.durationMinutes}m
+                                <span
+                                  className={`text-[10px] font-semibold tabular-nums ${
+                                    isDraftTask
+                                      ? 'text-amber-700 dark:text-amber-400 font-bold'
+                                      : 'text-stone-400 dark:text-stone-500'
+                                  }`}
+                                >
+                                  {isDraftTask
+                                    ? `⏸ ${formatTimerClock(activeTimerDraft.secondsRemaining)}`
+                                    : `⏱ ${t.durationMinutes}m`}
                                 </span>
                               </div>
 
@@ -263,11 +346,17 @@ export const ScheduleView: React.FC = () => {
                                   </span>
                                 ) : (
                                   <button
-                                    onClick={() => startStudySession(t)}
-                                    className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
+                                    onClick={() =>
+                                      isDraftTask ? resumePausedTimer() : startStudySession(t)
+                                    }
+                                    className={`flex items-center gap-1 text-[11px] font-bold ${
+                                      isPausedTask
+                                        ? 'text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300'
+                                        : 'text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300'
+                                    }`}
                                   >
-                                    <Play className="h-3 w-3 fill-indigo-600 dark:fill-indigo-400" />
-                                    <span>Estudar</span>
+                                    <Play className="h-3 w-3 fill-current" />
+                                    <span>{isPausedTask ? 'Continuar' : 'Estudar'}</span>
                                   </button>
                                 )}
                               </div>
@@ -308,12 +397,16 @@ export const ScheduleView: React.FC = () => {
             <div className="space-y-3">
               {currentDayTasks.map((t, idx) => {
                 const isDone = t.status === 'concluida';
+                const isDraftTask = activeTimerDraft?.task.id === t.id;
+                const isPausedTask = isDraftTask || t.status === 'em_andamento';
                 return (
                   <div
                     key={`${t.id}-${idx}`}
                     className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border p-4 ${
                       isDone
                         ? 'border-stone-200 bg-stone-50/60 opacity-80 dark:border-stone-800 dark:bg-stone-800/40'
+                        : isPausedTask
+                        ? 'border-amber-300 bg-amber-50/40 dark:border-amber-700/70 dark:bg-amber-950/20'
                         : 'border-stone-200 bg-white hover:border-indigo-300 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-indigo-700'
                     }`}
                   >
@@ -322,6 +415,8 @@ export const ScheduleView: React.FC = () => {
                         className={`mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
                           isDone
                             ? 'bg-emerald-600 text-white'
+                            : isPausedTask
+                            ? 'bg-amber-500 text-white'
                             : 'bg-stone-100 text-stone-700 border border-stone-200 dark:bg-stone-800 dark:text-stone-300 dark:border-stone-700'
                         }`}
                       >
@@ -355,18 +450,25 @@ export const ScheduleView: React.FC = () => {
                           {t.topicName}
                         </h4>
 
-                        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-                          ⏱ {t.durationMinutes} minutos • Prioridade calculada: {t.priorityScore} pts
+                        <p className="mt-1 text-xs text-stone-500 dark:text-stone-400 tabular-nums">
+                          {isDraftTask ? (
+                            <span className="font-bold text-amber-700 dark:text-amber-400">
+                              Pausado com {formatTimerClock(activeTimerDraft.secondsRemaining)} restantes
+                            </span>
+                          ) : (
+                            <span>{t.durationMinutes} minutos</span>
+                          )}
+                          <span aria-hidden="true"> · </span>
+                          <span>Prioridade calculada: {t.priorityScore} pts</span>
+                          {t.pareiEm && (
+                            <>
+                              <span aria-hidden="true"> · </span>
+                              <span className="font-semibold text-indigo-600 dark:text-cyan-400">
+                                Parou em: {t.pareiEm}
+                              </span>
+                            </>
+                          )}
                         </p>
-
-                        <div className="mt-2 space-y-1">
-                          {t.objectives.map((obj, i) => (
-                            <div key={i} className="flex items-center gap-1.5 text-xs text-stone-600 dark:text-stone-300">
-                              <span className="h-1.5 w-1.5 rounded-full bg-stone-300 dark:bg-stone-600" />
-                              <span>{obj}</span>
-                            </div>
-                          ))}
-                        </div>
                       </div>
                     </div>
 
@@ -378,11 +480,17 @@ export const ScheduleView: React.FC = () => {
                         </span>
                       ) : (
                         <button
-                          onClick={() => startStudySession(t)}
-                          className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-indigo-700 active:scale-95 transition-all"
+                          onClick={() =>
+                            isDraftTask ? resumePausedTimer() : startStudySession(t)
+                          }
+                          className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold text-white shadow-xs active:scale-95 transition-all whitespace-nowrap ${
+                            isPausedTask
+                              ? 'bg-amber-600 hover:bg-amber-700'
+                              : 'bg-indigo-600 hover:bg-indigo-700'
+                          }`}
                         >
                           <Play className="h-3.5 w-3.5 fill-white" />
-                          <span>Iniciar Bloco</span>
+                          <span>{isPausedTask ? 'Continuar' : 'Iniciar Bloco'}</span>
                         </button>
                       )}
                     </div>

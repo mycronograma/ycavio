@@ -16,6 +16,15 @@ export type TaskType = 'teoria' | 'exercicios' | 'revisao' | 'simulado';
 
 export type TaskStatus = 'pendente' | 'em_andamento' | 'concluida' | 'atrasada' | 'pulada';
 
+export type StudyMethodId =
+  | 'pomodoro'
+  | 'blocos_50_10'
+  | 'active_recall'
+  | 'estudo_reverso'
+  | 'intercalado'
+  | 'feynman'
+  | 'personalizado';
+
 export interface SubjectTopic {
   id: string;
   name: string;
@@ -79,6 +88,19 @@ export interface Task {
   revisaoNotes?: string;
 }
 
+export interface ActiveTimerDraft {
+  task: Task;
+  totalSeconds: number;
+  secondsRemaining: number;
+  isRunning: boolean;
+  pareiEm: string;
+  cadernoQuestoes: string;
+  exercisesDone: number;
+  exercisesCorrect: number;
+  notes: string;
+  updatedAt: number;
+}
+
 export interface SpacedReview {
   id: string;
   subjectId: string;
@@ -122,11 +144,22 @@ export interface Achievement {
   xpReward: number;
 }
 
+export interface CustomDailyGoalItem {
+  id: string;
+  title: string;
+  completed: boolean;
+  recurringDaily: boolean;
+  createdDate: string; // YYYY-MM-DD
+}
+
 export interface DailyGoal {
   targetMinutes: number;
   targetTasks: number;
+  targetQuestions?: number;
   completedMinutes: number;
   completedTasks: number;
+  lastResetDate?: string; // YYYY-MM-DD
+  customGoals?: CustomDailyGoalItem[];
 }
 
 export interface UserProfile {
@@ -139,8 +172,11 @@ export interface UserProfile {
   targetTotalHours?: number; // Total hours goal when user has no fixed exam date
   profileType: StudyProfileType;
   dailyAvailableMinutes: number; // e.g. 120 (2h)
+  dailyMinutesByDay?: Partial<Record<number, number>>; // 0=Sun..6=Sat custom minutes per day
   availableDays: number[]; // 0=Sun, 1=Mon, ..., 6=Sat
-  preferredSessionLength: number; // 25, 45, 50, 60 min
+  preferredSessionLength: number; // 25, 35, 40, 45, 50, 60 min or custom
+  preferredBreakLength?: number; // 5, 10, 15, 20 min or custom
+  studyMethod?: StudyMethodId;
 
   // Gamification stats
   xp: number;
@@ -154,7 +190,49 @@ export interface UserProfile {
 
   // Onboarding state
   onboardingCompleted: boolean;
+  presetChosen?: boolean;
+  weeklyLoad?: 'leve' | 'normal' | 'intensivo';
   createdAt: string;
+}
+
+export interface QuestionLog {
+  id: string;
+  subjectId: string;
+  subjectName?: string;
+  topicName?: string;
+  totalQuestions: number;
+  correctAnswers: number;
+  date: string; // YYYY-MM-DD
+  sessionType: 'EXERCICIOS' | 'SIMULADO';
+  notes?: string;
+  createdAt: string;
+}
+
+export interface FixedCommitment {
+  id: string;
+  day: number; // 0=Dom, 1=Seg, ..., 6=Sab
+  startTime: string; // "08:00"
+  endTime: string; // "17:00"
+  label: string; // "Trabalho", "Faculdade", "Academia", etc.
+  color?: string;
+}
+
+export interface InAppNotification {
+  id: string;
+  title: string;
+  message: string;
+  date: string;
+  read: boolean;
+  type: 'streak' | 'backlog' | 'review' | 'goal' | 'achievement' | 'system';
+}
+
+export interface UserAccount {
+  id: string;
+  name: string;
+  email: string;
+  isLoggedIn: boolean;
+  avatarSeed?: string;
+  role?: string;
 }
 
 export interface AppState {
@@ -166,4 +244,10 @@ export interface AppState {
   achievements: Achievement[];
   dailyGoal: DailyGoal;
   lastScheduleGeneratedAt?: string;
+
+  // New capabilities matching Nexora
+  questionLogs?: QuestionLog[];
+  fixedCommitments?: FixedCommitment[];
+  notifications?: InAppNotification[];
+  currentUser?: UserAccount;
 }

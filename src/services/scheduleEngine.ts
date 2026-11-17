@@ -4,8 +4,69 @@ import {
   UserProfile,
   SpacedReview,
   TaskType,
-  StudySession,
+  FixedCommitment,
+  StudyMethodId,
 } from '../types';
+import { getStudyMethodPreset, StudyMethodPreset } from './studyMethods';
+
+const AWAKE_MINUTES_PER_DAY = 16 * 60; // 16h úteis descontando 8h de sono
+
+const WEEKDAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+function parseTimeToMinutes(timeStr: string): number {
+  const [h, m] = timeStr.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return h * 60 + m;
+}
+
+export function calculateCommittedMinutesForDay(
+  fixedCommitments: FixedCommitment[],
+  dayOfWeek: number
+): number {
+  if (!fixedCommitments || fixedCommitments.length === 0) return 0;
+  return fixedCommitments
+    .filter((c) => c.day === dayOfWeek)
+    .reduce((sum, c) => {
+      const start = parseTimeToMinutes(c.startTime);
+      const end = parseTimeToMinutes(c.endTime);
+      const diff = end >= start ? end - start : 24 * 60 - start + end;
+      return sum + Math.max(0, diff);
+    }, 0);
+}
+
+export interface DailyCommitmentConflict {
+  day: number;
+  dayLabel: string;
+  plannedMinutes: number;
+  blockedMinutes: number;
+  remainingAwakeMinutes: number;
+}
+
+export function getDailyCommitmentConflicts(
+  profile: UserProfile,
+  fixedCommitments: FixedCommitment[] = []
+): DailyCommitmentConflict[] {
+  if (!fixedCommitments || fixedCommitments.length === 0) return [];
+  const conflicts: DailyCommitmentConflict[] = [];
+
+  for (const day of profile.availableDays) {
+    const blockedMinutes = calculateCommittedMinutesForDay(fixedCommitments, day);
+    if (blockedMinutes <= 0) continue;
+    const plannedMinutes = profile.dailyMinutesByDay?.[day] ?? profile.dailyAvailableMinutes;
+    const remainingAwakeMinutes = Math.max(0, AWAKE_MINUTES_PER_DAY - blockedMinutes);
+    if (plannedMinutes > remainingAwakeMinutes) {
+      conflicts.push({
+        day,
+        dayLabel: WEEKDAY_NAMES[day] || `Dia ${day}`,
+        plannedMinutes,
+        blockedMinutes,
+        remainingAwakeMinutes,
+      });
+    }
+  }
+
+  return conflicts;
+}
 
 // Helper to format Date as YYYY-MM-DD in local time
 export function formatDate(date: Date): string {
@@ -107,35 +168,45 @@ export function calculateSubjectPriority(
 }
 
 /**
- * Standard objectives for each task type to guide the student clearly
+ * Task objectives are kept empty by default unless explicitly entered by the user
  */
-export function generateTaskObjectives(type: TaskType, topicName: string): string[] {
-  switch (type) {
-    case 'teoria':
-      return [
-        `Compreender conceitos essenciais de ${topicName}`,
-        'Elaborar resumo esquemático ou mapa mental com pontos-chave',
-        'Identificar pegadinhas e regras principais',
-      ];
-    case 'exercicios':
-      return [
-        `Resolver bateria de 10 a 15 questões práticas sobre ${topicName}`,
-        'Cronometrar tempo médio por questão',
-        'Revisar gabarito comentado e catalogar dúvidas',
-      ];
-    case 'revisao':
-      return [
-        `Revisão Ativa: auto-explicação dos tópicos de ${topicName}`,
-        'Revisar erros de questões anteriores',
-        'Reforçar fórmulas, prazos ou definições críticas',
-      ];
-    case 'simulado':
-      return [
-        `Simulado focado com questões cronometradas`,
-        'Avaliar índice de acerto por subtema',
-        'Mapear pontos de fraqueza para ajuste imediato',
-      ];
+export function generateTaskObjectives(
+  _type: TaskType,
+  _topicName: string,
+  _methodId?: StudyMethodId
+): string[] {
+  return [];
+}
+
+function selectTaskTypeByMethod(
+  methodPreset: StudyMethodPreset,
+  subject: Subject,
+  slotOrderIndex: number
+): TaskType {
+  // Ajusta suavemente os pesos conforme nível de domínio quando não for método altamente direcionado
+  let teoriaWeight = methodPreset.ratios.teoria;
+  let exerciciosWeight = methodPreset.ratios.exercicios;
+  const revisaoWeight = methodPreset.ratios.revisao;
+
+  if (methodPreset.id !== 'estudo_reverso' && methodPreset.id !== 'feynman') {
+    if (subject.knowledgeLevel === 'avancado') {
+      const shift = Math.min(20, Math.floor(teoriaWeight / 2));
+      teoriaWeight -= shift;
+      exerciciosWeight += shift;
+    } else if (subject.knowledgeLevel === 'iniciante') {
+      const shift = Math.min(15, Math.floor(exerciciosWeight / 3));
+      teoriaWeight += shift;
+      exerciciosWeight -= shift;
+    }
   }
+
+  const total = Math.max(1, teoriaWeight + exerciciosWeight + revisaoWeight);
+  // Passo determinístico distribuído (passo 37 mod 100 evita sequências idênticas repetitivas)
+  const bucket = ((slotOrderIndex * 37 + subject.completedTasksCount * 29) % total);
+
+  if (bucket < teoriaWeight) return 'teoria';
+  if (bucket < teoriaWeight + exerciciosWeight) return 'exercicios';
+  return 'revisao';
 }
 
 /**
@@ -144,7 +215,7 @@ export function generateTaskObjectives(type: TaskType, topicName: string): strin
  */
 export function selectNextTopicForSubject(subject: Subject): { id?: string; name: string } {
   if (!subject.topics || subject.topics.length === 0) {
-    return { name: `Fundamentos de ${subject.name}` };
+    return { name: subject.pareiEm?.trim() || subject.name };
   }
 
   const uncompleted = subject.topics.find((t) => !t.completed);
@@ -176,7 +247,8 @@ export function generateSmartSchedule(
   subjects: Subject[],
   existingReviews: SpacedReview[],
   existingTasks: Task[] = [],
-  daysAhead: number = 7
+  daysAhead: number = 7,
+  fixedCommitments: FixedCommitment[] = []
 ): Task[] {
   if (subjects.length === 0) return [];
 
@@ -194,9 +266,10 @@ export function generateSmartSchedule(
   );
 
   const newScheduleTasks: Task[] = [];
-  const sessionLength = Math.max(25, profile.preferredSessionLength || 50);
-  const dailyTime = Math.max(sessionLength, profile.dailyAvailableMinutes || 120);
-  const slotsPerDay = Math.max(1, Math.floor(dailyTime / sessionLength));
+  const methodPreset = getStudyMethodPreset(profile.studyMethod);
+  const sessionLength = Math.max(10, profile.preferredSessionLength || methodPreset.focusMinutes || 50);
+  const minSlotMinutes = Math.min(25, sessionLength);
+  const fallbackDailyTime = Math.max(sessionLength, profile.dailyAvailableMinutes || 120);
 
   // Sort subjects by initial priority score
   const prioritizedSubjects = subjects.map((sub) => ({
@@ -209,6 +282,7 @@ export function generateSmartSchedule(
   subjects.forEach((s) => (subjectStudyCount[s.id] = 0));
 
   let lastSubjectIdUsed: string | null = null;
+  let globalSlotCounter = 0;
 
   for (let i = 0; i < daysAhead; i++) {
     const targetDate = new Date(today);
@@ -221,6 +295,21 @@ export function generateSmartSchedule(
     if (!isAvailableDay) {
       continue;
     }
+
+    const rawDayMinutes = profile.dailyMinutesByDay?.[dayOfWeek] ?? fallbackDailyTime;
+    const blockedMinutes = calculateCommittedMinutesForDay(fixedCommitments, dayOfWeek);
+    const netAwakeMinutes = Math.max(0, AWAKE_MINUTES_PER_DAY - blockedMinutes);
+    const effectiveDayMinutes =
+      blockedMinutes > 0 && netAwakeMinutes < rawDayMinutes
+        ? Math.max(0, netAwakeMinutes)
+        : rawDayMinutes;
+
+    if (effectiveDayMinutes < minSlotMinutes) {
+      continue;
+    }
+
+    const dailyTime = Math.max(sessionLength, effectiveDayMinutes);
+    const slotsPerDay = Math.max(1, Math.floor(dailyTime / sessionLength));
 
     let remainingMinutesToday = dailyTime;
     let slotsAssigned = 0;
@@ -235,6 +324,7 @@ export function generateSmartSchedule(
 
       const matchedSub = subjects.find((s) => s.id === review.subjectId);
       const subColor = matchedSub ? matchedSub.color : review.subjectColor || 'bg-amber-500';
+      const reviewDuration = Math.min(30, sessionLength);
 
       newScheduleTasks.push({
         id: `task-rev-${review.id}-${dateStr}`,
@@ -243,16 +333,16 @@ export function generateSmartSchedule(
         subjectColor: subColor,
         topicName: review.topicName,
         type: 'revisao',
-        durationMinutes: Math.min(30, sessionLength),
+        durationMinutes: reviewDuration,
         date: dateStr,
         status: 'pendente',
         priorityScore: 99, // maximum priority for due spaced repetitions
-        objectives: generateTaskObjectives('revisao', review.topicName),
+        objectives: generateTaskObjectives('revisao', review.topicName, profile.studyMethod),
         isSpacedReview: true,
         reviewStep: review.step,
       });
 
-      remainingMinutesToday -= Math.min(30, sessionLength);
+      remainingMinutesToday -= reviewDuration;
       slotsAssigned++;
       lastSubjectIdUsed = review.subjectId;
       subjectStudyCount[review.subjectId] = (subjectStudyCount[review.subjectId] || 0) + 1;
@@ -275,18 +365,21 @@ export function generateSmartSchedule(
     }
 
     // 3. Fill remaining daily slots with priority-balanced regular study sessions
-    while (slotsAssigned < slotsPerDay && remainingMinutesToday >= 25) {
+    const spreadPenalty = methodPreset.interleaveStrength === 'high' ? 3.5 : 2.5;
+    const backToBackPenalty = methodPreset.interleaveStrength === 'high' ? 16 : 8;
+
+    while (slotsAssigned < slotsPerDay && remainingMinutesToday >= minSlotMinutes) {
       // Re-rank subjects dynamically:
       // High initial priority + low recent allocation - penalty if just studied in previous slot
       const candidates = prioritizedSubjects
         .map((p) => {
           let dynamicScore = p.priority;
           const studyCount = subjectStudyCount[p.subject.id] || 0;
-          dynamicScore -= studyCount * 2.5; // balance spread
+          dynamicScore -= studyCount * spreadPenalty;
 
           // Interleaving penalty: don't place same subject back-to-back unless user has only 1 subject
           if (subjects.length > 1 && p.subject.id === lastSubjectIdUsed) {
-            dynamicScore -= 8;
+            dynamicScore -= backToBackPenalty;
           }
 
           return {
@@ -298,15 +391,7 @@ export function generateSmartSchedule(
 
       const chosen = candidates[0].subject;
       const topicInfo = selectNextTopicForSubject(chosen);
-
-      // Decide type: beginner/high difficulty gets more theory + exercises, advanced gets practice
-      let taskType: TaskType = 'teoria';
-      if (chosen.knowledgeLevel === 'avancado') {
-        taskType = 'exercicios';
-      } else if (chosen.completedTasksCount % 2 === 1) {
-        taskType = 'exercicios';
-      }
-
+      const taskType = selectTaskTypeByMethod(methodPreset, chosen, globalSlotCounter);
       const taskDuration = Math.min(sessionLength, remainingMinutesToday);
 
       newScheduleTasks.push({
@@ -321,7 +406,7 @@ export function generateSmartSchedule(
         date: dateStr,
         status: 'pendente',
         priorityScore: Math.max(1, Math.round(candidates[0].score)),
-        objectives: generateTaskObjectives(taskType, topicInfo.name),
+        objectives: generateTaskObjectives(taskType, topicInfo.name, profile.studyMethod),
         pareiEm: chosen.pareiEm,
         cadernoQuestoes: chosen.cadernoQuestoes,
         revisaoNotes: chosen.revisaoNotes,
@@ -329,6 +414,7 @@ export function generateSmartSchedule(
 
       remainingMinutesToday -= taskDuration;
       slotsAssigned++;
+      globalSlotCounter++;
       lastSubjectIdUsed = chosen.id;
       subjectStudyCount[chosen.id] = (subjectStudyCount[chosen.id] || 0) + 1;
     }

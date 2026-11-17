@@ -17,6 +17,8 @@ import {
 import { useStudy } from '../../context/StudyContext';
 import { getTodayStr, getLevelProgress } from '../../services/scheduleEngine';
 import { Task } from '../../types';
+import { BacklogWarning } from './BacklogWarning';
+import { PassProjection } from './PassProjection';
 
 interface TodayDashboardProps {
   onNavigateToSchedule: () => void;
@@ -57,8 +59,40 @@ export const TodayDashboard: React.FC<TodayDashboardProps> = ({
   const greeting =
     hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite';
 
+  if (subjects.length === 0) {
+    return (
+      <div className="space-y-6 pb-12">
+        <div className="rounded-2xl border border-stone-200 bg-white p-6 sm:p-8 shadow-xs dark:border-stone-800 dark:bg-stone-900">
+          <div className="max-w-lg space-y-3">
+            <h2 className="text-2xl font-black tracking-tight text-stone-900 dark:text-stone-100">
+              {greeting}, {profile.name || 'Estudante'}!
+            </h2>
+            <p className="text-sm text-stone-600 dark:text-stone-400 leading-relaxed">
+              Sua conta começou zerada (<strong className="tabular-nums">0 matérias</strong>,{' '}
+              <strong className="tabular-nums">0 XP</strong> e{' '}
+              <strong className="tabular-nums">0 dias</strong>). Escolha um preset ou cadastre suas matérias para gerarmos seu estudo de hoje.
+            </p>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={onNavigateToSubjects}
+                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 transition"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span>Escolher Preset ou Adicionar Matérias</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-12">
+      {/* Overdue Backlog Warning & 1-Click Redistribution */}
+      <BacklogWarning />
+
       {/* Top Welcome & Daily Status Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white p-5 sm:p-6 shadow-xs dark:border-stone-800 dark:bg-stone-900 transition-colors">
         <div>
@@ -103,6 +137,12 @@ export const TodayDashboard: React.FC<TodayDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* "Você Passa? / Ritmo até a Prova" Projection */}
+      <PassProjection
+        profile={profile}
+        totalStudiedMinutes={state.sessions.reduce((acc, s) => acc + s.durationMinutes, 0)}
+      />
 
       {/* Hero: "PRÓXIMA TAREFA RECOMENDADA" */}
       {nextTask ? (

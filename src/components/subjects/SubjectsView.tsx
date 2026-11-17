@@ -1,27 +1,54 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   BookOpen,
   Plus,
   Edit2,
   Trash2,
-  Clock,
-  CheckCircle2,
-  Calendar,
-  AlertTriangle,
-  Flame,
   X,
   Check,
   ChevronDown,
   ChevronUp,
-  ListPlus,
-  Table2,
+  Sparkles,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
 import { Subject, SubjectDifficulty, KnowledgeLevel } from '../../types';
+import { PresetSelector, WeeklyLoadLevel } from './PresetSelector';
 
-export const SubjectsView: React.FC = () => {
+interface SubjectsViewProps {
+  forcePresetMode?: boolean;
+  onClearForcePreset?: () => void;
+  forceListSignal?: number;
+  onSelectPresetForWizard: (presetId: string, weeklyLoad: WeeklyLoadLevel) => void;
+}
+
+export const SubjectsView: React.FC<SubjectsViewProps> = ({
+  forcePresetMode = false,
+  onClearForcePreset,
+  forceListSignal = 0,
+  onSelectPresetForWizard,
+}) => {
   const { state, addSubject, updateSubject, deleteSubject } = useStudy();
-  const { subjects, reviews } = state;
+  const { subjects, reviews, profile } = state;
+
+  const [viewMode, setViewMode] = useState<'presets' | 'list'>(() =>
+    forcePresetMode || !profile.presetChosen || subjects.length === 0 ? 'presets' : 'list'
+  );
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (forcePresetMode) {
+      setViewMode('presets');
+      onClearForcePreset?.();
+    } else if (!profile.presetChosen && subjects.length === 0) {
+      setViewMode('presets');
+    }
+  }, [forcePresetMode, onClearForcePreset, profile.presetChosen, subjects.length]);
+
+  useEffect(() => {
+    if (forceListSignal > 0) {
+      setViewMode('list');
+    }
+  }, [forceListSignal]);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
@@ -37,6 +64,7 @@ export const SubjectsView: React.FC = () => {
   // Interactive Topics List (Cada um com botão de + e remoção)
   const [topicList, setTopicList] = useState<string[]>([]);
   const [newTopicInput, setNewTopicInput] = useState('');
+  const [quickTopicInputs, setQuickTopicInputs] = useState<Record<string, string>>({});
 
   const colorPalette = [
     '#3b82f6', // blue
@@ -56,7 +84,7 @@ export const SubjectsView: React.FC = () => {
     setWeight(4);
     setDifficulty('media');
     setKnowledgeLevel('intermediario');
-    setTopicList(['Introdução e Teoria Inicial', 'Exercícios Práticos']);
+    setTopicList([]);
     setNewTopicInput('');
     setEditingSubject(null);
     setIsAddModalOpen(true);
@@ -121,7 +149,7 @@ export const SubjectsView: React.FC = () => {
         weight,
         difficulty,
         knowledgeLevel,
-        topics: updatedTopics.length > 0 ? updatedTopics : editingSubject.topics,
+        topics: updatedTopics,
       });
     } else {
       addSubject({
@@ -130,12 +158,41 @@ export const SubjectsView: React.FC = () => {
         weight,
         difficulty,
         knowledgeLevel,
-        topics: cleanTopics.length > 0 ? cleanTopics : ['Introdução aos Conceitos', 'Tópicos Centrais', 'Exercícios Práticos'],
+        topics: cleanTopics,
       });
     }
 
     setIsAddModalOpen(false);
   };
+
+  const handleQuickAddTopic = (sub: Subject) => {
+    const trimmed = (quickTopicInputs[sub.id] || '').trim();
+    if (!trimmed) return;
+
+    const newTopic = {
+      id: `top-${sub.id}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      name: trimmed,
+      completed: false,
+    };
+
+    updateSubject({
+      ...sub,
+      topics: [...sub.topics, newTopic],
+    });
+
+    setQuickTopicInputs((prev) => ({ ...prev, [sub.id]: '' }));
+  };
+
+  if (viewMode === 'presets') {
+    return (
+      <PresetSelector
+        initialLoad={profile.weeklyLoad || 'leve'}
+        existingSubjectsCount={subjects.length}
+        onSelectPreset={onSelectPresetForWizard}
+        onBackToMySubjects={() => setViewMode('list')}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12">
@@ -151,13 +208,25 @@ export const SubjectsView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-indigo-700 active:scale-95 transition"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Nova Matéria</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setViewMode('presets')}
+            className="flex items-center gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700 transition whitespace-nowrap shrink-0"
+          >
+            <Sparkles className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+            <span>Escolher Modelo (Presets)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenAdd}
+            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-md hover:bg-indigo-700 active:scale-95 transition whitespace-nowrap shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Nova Matéria</span>
+          </button>
+        </div>
       </div>
 
       {/* Grid of Subject Cards */}
@@ -230,18 +299,36 @@ export const SubjectsView: React.FC = () => {
                     >
                       <Edit2 className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (confirm(`Tem certeza que deseja remover a matéria "${sub.name}"?`)) {
-                          deleteSubject(sub.id);
-                        }
-                      }}
-                      className="p-1.5 text-stone-400 hover:text-rose-600 rounded-md hover:bg-stone-100 dark:text-stone-500 dark:hover:text-rose-400 dark:hover:bg-stone-800"
-                      title="Excluir matéria"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {confirmDeleteId === sub.id ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            deleteSubject(sub.id);
+                            setConfirmDeleteId(null);
+                          }}
+                          className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-rose-700"
+                        >
+                          Remover
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(sub.id)}
+                        className="p-1.5 text-stone-400 hover:text-rose-600 rounded-md hover:bg-stone-100 dark:text-stone-500 dark:hover:text-rose-400 dark:hover:bg-stone-800"
+                        title="Excluir matéria"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -260,8 +347,10 @@ export const SubjectsView: React.FC = () => {
                       }}
                     />
                   </div>
-                  <span className="mt-1 block text-[11px] text-stone-400 dark:text-stone-500">
-                    {completedTopicsCount} de {sub.topics.length} tópicos concluídos
+                  <span className="mt-1 block text-[11px] text-stone-400 dark:text-stone-500 tabular-nums">
+                    {sub.topics.length === 0
+                      ? 'Sem tópicos cadastrados ainda'
+                      : `${completedTopicsCount} de ${sub.topics.length} tópicos concluídos`}
                   </span>
                 </div>
 
@@ -304,26 +393,61 @@ export const SubjectsView: React.FC = () => {
                 </button>
 
                 {isExpanded && (
-                  <div className="mt-2.5 space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                    {sub.topics.map((top) => (
-                      <div
-                        key={top.id}
-                        className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${
-                          top.completed
-                            ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-                            : 'bg-stone-50 text-stone-700 dark:bg-stone-800 dark:text-stone-300'
-                        }`}
-                      >
-                        <span className={`truncate ${top.completed ? 'line-through text-stone-400 dark:text-stone-500' : 'font-medium'}`}>
-                          {top.name}
-                        </span>
-                        {top.completed ? (
-                          <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        ) : (
-                          <span className="text-[10px] text-stone-400 dark:text-stone-500">Pendente</span>
-                        )}
+                  <div className="mt-2.5 space-y-2">
+                    {sub.topics.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-stone-200 dark:border-stone-700 px-3 py-2 text-[11px] text-stone-400 dark:text-stone-500 text-center">
+                        Nenhum tópico cadastrado. Adicione seus tópicos abaixo.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                        {sub.topics.map((top) => (
+                          <div
+                            key={top.id}
+                            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${
+                              top.completed
+                                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                : 'bg-stone-50 text-stone-700 dark:bg-stone-800 dark:text-stone-300'
+                            }`}
+                          >
+                            <span className={`truncate ${top.completed ? 'line-through text-stone-400 dark:text-stone-500' : 'font-medium'}`}>
+                              {top.name}
+                            </span>
+                            {top.completed ? (
+                              <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            ) : (
+                              <span className="text-[10px] text-stone-400 dark:text-stone-500">Pendente</span>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
+
+                    <div className="flex gap-1.5 pt-1">
+                      <input
+                        type="text"
+                        value={quickTopicInputs[sub.id] || ''}
+                        onChange={(e) =>
+                          setQuickTopicInputs((prev) => ({ ...prev, [sub.id]: e.target.value }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleQuickAddTopic(sub);
+                          }
+                        }}
+                        placeholder="Novo tópico..."
+                        className="flex-1 min-w-0 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-xs text-stone-900 outline-hidden focus:border-indigo-500 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleQuickAddTopic(sub)}
+                        className="flex items-center justify-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 transition shrink-0"
+                        title="Adicionar tópico rápido"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Adicionar</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
