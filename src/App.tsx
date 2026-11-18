@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { ThemeProvider } from './context/ThemeContext';
+import { ToastProvider } from './context/ToastContext';
 import { StudyProvider, useStudy } from './context/StudyContext';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar, NavSection } from './components/layout/Sidebar';
@@ -248,9 +249,11 @@ const MainAppContent: React.FC = () => {
 export default function App() {
   return (
     <ThemeProvider>
-      <StudyProvider>
-        <MainAppContent />
-      </StudyProvider>
+      <ToastProvider>
+        <StudyProvider>
+          <MainAppContent />
+        </StudyProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

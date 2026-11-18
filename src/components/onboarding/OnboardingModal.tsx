@@ -9,7 +9,8 @@ import {
   Plus,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
-import { STUDY_PRESETS } from '../../services/storageService';
+import { useToast } from '../../context/ToastContext';
+import { STUDY_PRESETS, getPresetTopics } from '../../services/storageService';
 import {
   Subject,
   StudyProfileType,
@@ -119,6 +120,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   initialWeeklyLoad = 'leve' as WeeklyLoadLevel,
 }) => {
   const { state, completeOnboarding } = useStudy();
+  const { showToast } = useToast();
 
   const [step, setStep] = useState(1);
   const totalSteps = 7;
@@ -375,16 +377,18 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     const colors = ['#6366f1', '#ec4899', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
     const randomColor = colors[subjectsList.length % colors.length];
 
+    const trimmedName = newSubName.trim();
+    const suggestedTopics = getPresetTopics(trimmedName, selectedPresetId);
     setSubjectsList((prev) => [
       ...prev,
       {
         id: `sub-custom-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-        name: newSubName.trim(),
+        name: trimmedName,
         color: randomColor,
         weight: 3,
         difficulty: 'media',
         knowledgeLevel: contentLevel,
-        topics: [],
+        topics: suggestedTopics,
       },
     ]);
     setNewSubName('');
@@ -471,6 +475,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       finalSubjects
     );
 
+    showToast('Cronograma gerado com sucesso!', 'success');
     onCompleted?.();
     onClose();
   };
@@ -1057,7 +1062,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
                   {selectedPresetId === 'personalizado'
                     ? 'Adicione as matérias do seu estudo e escolha o peso de cada uma.'
-                    : 'Ajuste pesos (1–5), remova ou adicione matérias. Você cadastra os tópicos depois em Matérias.'}
+                    : 'Ajuste pesos (1–5), remova ou adicione matérias. Os conteúdos base já estão pré-carregados!'}
                 </p>
               </div>
 
@@ -1105,9 +1110,16 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                           className="h-2.5 w-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: sub.color }}
                         />
-                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
-                          {sub.name}
-                        </span>
+                        <div className="min-w-0">
+                          <span className="block text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                            {sub.name}
+                          </span>
+                          {sub.topics.length > 0 && (
+                            <span className="block text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">
+                              {sub.topics.length} tópicos incluídos
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">

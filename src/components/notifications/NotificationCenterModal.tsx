@@ -1,7 +1,9 @@
 import React from 'react';
-import { X, Bell, Check, CheckCheck, Flame, AlertTriangle, RotateCw, Trophy, Info } from 'lucide-react';
+import { X, Bell, CheckCheck, Flame, AlertTriangle, RotateCw, Trophy, Info, Trash2 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
+import { useToast } from '../../context/ToastContext';
 import { InAppNotification } from '../../types';
+import { formatRelativeDatePtBr, formatFullDatePtBr } from '../../lib/dateUtils';
 
 interface NotificationCenterModalProps {
   isOpen: boolean;
@@ -12,7 +14,9 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
   isOpen,
   onClose,
 }) => {
-  const { state, markNotificationRead, clearAllNotifications } = useStudy();
+  const { state, markNotificationRead, markAllNotificationsRead, clearAllNotifications } =
+    useStudy();
+  const { showToast } = useToast();
   const notifications = state.notifications || [];
 
   if (!isOpen) return null;
@@ -55,7 +59,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                 Notificações
               </h2>
               {unreadCount > 0 && (
-                <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black text-white">
+                <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black text-white tabular-nums">
                   {unreadCount} nova{unreadCount > 1 ? 's' : ''}
                 </span>
               )}
@@ -68,17 +72,36 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
 
         {/* Actions bar */}
         {notifications.length > 0 && (
-          <div className="flex items-center justify-between pb-3 border-b border-stone-100 dark:border-stone-800 text-xs">
-            <span className="text-stone-400">{notifications.length} avisos</span>
-            {unreadCount > 0 && (
+          <div className="flex items-center justify-between gap-3 pb-3 border-b border-stone-100 dark:border-stone-800 text-xs">
+            <span className="text-stone-400 tabular-nums">
+              {notifications.length} {notifications.length === 1 ? 'aviso' : 'avisos'}
+            </span>
+            <div className="flex items-center gap-3">
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    markAllNotificationsRead();
+                    showToast('Avisos marcados como lidos.', 'info');
+                  }}
+                  className="flex items-center gap-1 font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 transition whitespace-nowrap"
+                >
+                  <CheckCheck className="h-3.5 w-3.5" />
+                  <span>Marcar lidas</span>
+                </button>
+              )}
               <button
-                onClick={clearAllNotifications}
-                className="flex items-center gap-1 font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 transition"
+                type="button"
+                onClick={() => {
+                  clearAllNotifications();
+                  showToast('Notificações limpas.', 'info');
+                }}
+                className="flex items-center gap-1 font-bold text-stone-500 hover:text-rose-600 dark:text-stone-400 dark:hover:text-rose-400 transition whitespace-nowrap"
               >
-                <CheckCheck className="h-3.5 w-3.5" />
-                <span>Marcar todas como lidas</span>
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Limpar tudo</span>
               </button>
-            )}
+            </div>
           </div>
         )}
 
@@ -105,12 +128,18 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100 truncate">
                       {notif.title}
                     </h4>
-                    <span className="text-[10px] text-stone-400">
-                      {notif.date}
+                    <span
+                      title={formatFullDatePtBr(notif.date)}
+                      className="text-[10px] font-medium text-stone-400 whitespace-nowrap shrink-0"
+                    >
+                      {formatRelativeDatePtBr(notif.date, {
+                        capitalize: true,
+                        includeDateForFar: false,
+                      })}
                     </span>
                   </div>
                   <p className="mt-0.5 text-xs text-stone-600 dark:text-stone-400 leading-relaxed">

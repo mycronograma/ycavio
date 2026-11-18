@@ -9,10 +9,14 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
+  Wand2,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
+import { useToast } from '../../context/ToastContext';
 import { Subject, SubjectDifficulty, KnowledgeLevel } from '../../types';
 import { PresetSelector, WeeklyLoadLevel } from './PresetSelector';
+import { findSuggestedTopicsForSubject } from '../../services/presetTopics';
+import { formatRelativeDatePtBr, formatFullDatePtBr } from '../../lib/dateUtils';
 
 interface SubjectsViewProps {
   forcePresetMode?: boolean;
@@ -27,7 +31,15 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
   forceListSignal = 0,
   onSelectPresetForWizard,
 }) => {
-  const { state, addSubject, updateSubject, deleteSubject } = useStudy();
+  const {
+    state,
+    addSubject,
+    updateSubject,
+    toggleSubjectTopic,
+    loadSuggestedTopicsForSubject,
+    deleteSubject,
+  } = useStudy();
+  const { showToast } = useToast();
   const { subjects, reviews, profile } = state;
 
   const [viewMode, setViewMode] = useState<'presets' | 'list'>(() =>
@@ -151,6 +163,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
         knowledgeLevel,
         topics: updatedTopics,
       });
+      showToast(`Matéria "${name.trim()}" atualizada!`, 'success');
     } else {
       addSubject({
         name: name.trim(),
@@ -160,9 +173,26 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
         knowledgeLevel,
         topics: cleanTopics,
       });
+      showToast(`Matéria "${name.trim()}" adicionada!`, 'success');
     }
 
     setIsAddModalOpen(false);
+  };
+
+  const handleLoadSuggestedTopicsInModal = () => {
+    const suggestions = findSuggestedTopicsForSubject(name);
+    if (suggestions.length === 0) {
+      showToast('Nenhuma sugestão encontrada para este nome. Adicione manualmente abaixo.', 'info');
+      return;
+    }
+    const existingLower = new Set(topicList.map((t) => t.trim().toLowerCase()));
+    const fresh = suggestions.filter((s) => !existingLower.has(s.toLowerCase()));
+    if (fresh.length === 0) {
+      showToast('Todos os tópicos sugeridos já estão na lista.', 'info');
+      return;
+    }
+    setTopicList((prev) => [...prev, ...fresh]);
+    showToast(`${fresh.length} tópicos sugeridos adicionados!`, 'success');
   };
 
   const handleQuickAddTopic = (sub: Subject) => {
@@ -181,6 +211,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
     });
 
     setQuickTopicInputs((prev) => ({ ...prev, [sub.id]: '' }));
+    showToast(`Tópico "${trimmed}" adicionado!`, 'success');
   };
 
   if (viewMode === 'presets') {
@@ -306,6 +337,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                           onClick={() => {
                             deleteSubject(sub.id);
                             setConfirmDeleteId(null);
+                            showToast(`Matéria "${sub.name}" removida.`, 'info');
                           }}
                           className="rounded-md bg-rose-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-rose-700"
                         >
@@ -374,8 +406,11 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                   </div>
                   <div className="col-span-2 pt-1 border-t border-stone-200/60 dark:border-stone-700/60 flex items-center justify-between text-[11px]">
                     <span className="text-stone-500 dark:text-stone-400">Próxima Revisão:</span>
-                    <span className="font-semibold text-indigo-700 dark:text-indigo-400">
-                      {nextRev ? `Em ${nextRev.dueDate}` : 'Nenhuma pendente'}
+                    <span
+                      title={nextRev ? formatFullDatePtBr(nextRev.dueDate) : undefined}
+                      className="font-semibold text-indigo-700 dark:text-indigo-400 tabular-nums"
+                    >
+                      {nextRev ? formatRelativeDatePtBr(nextRev.dueDate) : 'Nenhuma pendente'}
                     </span>
                   </div>
                 </div>
@@ -395,29 +430,80 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                 {isExpanded && (
                   <div className="mt-2.5 space-y-2">
                     {sub.topics.length === 0 ? (
-                      <p className="rounded-lg border border-dashed border-stone-200 dark:border-stone-700 px-3 py-2 text-[11px] text-stone-400 dark:text-stone-500 text-center">
-                        Nenhum tópico cadastrado. Adicione seus tópicos abaixo.
-                      </p>
-                    ) : (
-                      <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                        {sub.topics.map((top) => (
-                          <div
-                            key={top.id}
-                            className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${
-                              top.completed
-                                ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                : 'bg-stone-50 text-stone-700 dark:bg-stone-800 dark:text-stone-300'
-                            }`}
+                      <div className="rounded-lg border border-dashed border-stone-200 dark:border-stone-700 px-3 py-2.5 text-center space-y-2">
+                        <p className="text-[11px] text-stone-400 dark:text-stone-500">
+                          Nenhum tópico cadastrado ainda.
+                        </p>
+                        {findSuggestedTopicsForSubject(sub.name).length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const suggestions = findSuggestedTopicsForSubject(sub.name);
+                              const added = loadSuggestedTopicsForSubject(sub.id, suggestions);
+                              if (added > 0) {
+                                showToast(
+                                  `${added} tópicos sugeridos carregados para ${sub.name}!`,
+                                  'success'
+                                );
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-50 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-cyan-300 dark:hover:bg-indigo-900/60 transition"
                           >
-                            <span className={`truncate ${top.completed ? 'line-through text-stone-400 dark:text-stone-500' : 'font-medium'}`}>
-                              {top.name}
+                            <Wand2 className="h-3.5 w-3.5" />
+                            <span>Carregar tópicos sugeridos</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                        {sub.topics.map((top) => (
+                          <button
+                            key={top.id}
+                            type="button"
+                            onClick={() => {
+                              const marked = toggleSubjectTopic(sub.id, top.id);
+                              showToast(
+                                marked
+                                  ? `Tópico "${top.name}" concluído!`
+                                  : `Tópico "${top.name}" reaberto.`,
+                                marked ? 'success' : 'info'
+                              );
+                            }}
+                            className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs text-left transition ${
+                              top.completed
+                                ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100/80 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-950/60'
+                                : 'bg-stone-50 text-stone-700 hover:bg-stone-100 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700/80'
+                            }`}
+                            title={
+                              top.completed
+                                ? 'Clique para marcar como pendente'
+                                : 'Clique para marcar como concluído'
+                            }
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
+                                  top.completed
+                                    ? 'border-emerald-600 bg-emerald-600 text-white'
+                                    : 'border-stone-300 bg-white dark:border-stone-600 dark:bg-stone-900'
+                                }`}
+                              >
+                                {top.completed && <Check className="h-3 w-3" />}
+                              </span>
+                              <span
+                                className={`truncate ${
+                                  top.completed
+                                    ? 'line-through text-stone-400 dark:text-stone-500'
+                                    : 'font-medium'
+                                }`}
+                              >
+                                {top.name}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-semibold shrink-0 text-stone-400 dark:text-stone-500">
+                              {top.completed ? 'Feito' : 'Marcar'}
                             </span>
-                            {top.completed ? (
-                              <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                            ) : (
-                              <span className="text-[10px] text-stone-400 dark:text-stone-500">Pendente</span>
-                            )}
-                          </div>
+                          </button>
                         ))}
                       </div>
                     )}
@@ -558,11 +644,22 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
 
               {/* Tópicos com Símbolo de + Individual */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center justify-between gap-2 mb-1.5">
                   <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 uppercase tracking-wider">
                     Tópicos / Conteúdos ({topicList.length})
                   </label>
-                  <span className="text-[10px] text-stone-400">Adicione com o símbolo de +</span>
+                  {findSuggestedTopicsForSubject(name).length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={handleLoadSuggestedTopicsInModal}
+                      className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-700 dark:text-cyan-400 dark:hover:text-cyan-300 transition"
+                    >
+                      <Wand2 className="h-3 w-3" />
+                      <span>Carregar tópicos sugeridos</span>
+                    </button>
+                  ) : (
+                    <span className="text-[10px] text-stone-400">Adicione com o botão +</span>
+                  )}
                 </div>
 
                 {/* Input with (+) Button */}
@@ -577,7 +674,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                         handleAddTopicToList();
                       }
                     }}
-                    placeholder="Digite um tópico e clique no +..."
+                    placeholder="Digite um tópico e clique em Adicionar..."
                     className="flex-1 rounded-xl border border-stone-300 px-3.5 py-2 text-xs text-stone-900 outline-hidden focus:border-indigo-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100"
                   />
                   <button
@@ -595,7 +692,7 @@ export const SubjectsView: React.FC<SubjectsViewProps> = ({
                 <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                   {topicList.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-stone-200 dark:border-stone-700 p-3 text-center text-xs text-stone-400">
-                      Nenhum tópico adicionado ainda. Use o campo acima para adicionar.
+                      Nenhum tópico adicionado ainda. Use o campo acima ou carregue tópicos sugeridos.
                     </div>
                   ) : (
                     topicList.map((topName, idx) => (

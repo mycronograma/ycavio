@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { AlertTriangle, RotateCw, CheckCircle2, Zap } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Zap } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
+import { useToast } from '../../context/ToastContext';
 import { getTodayStr } from '../../services/scheduleEngine';
 
 export const BacklogWarning: React.FC = () => {
   const { state, rescheduleBacklog } = useStudy();
+  const { showToast } = useToast();
   const { tasks } = state;
 
   const [isRescheduling, setIsRescheduling] = useState(false);
@@ -12,7 +14,7 @@ export const BacklogWarning: React.FC = () => {
 
   const todayStr = getTodayStr();
   const overdueTasks = tasks.filter(
-    (t) => t.date < todayStr && t.status !== 'concluida'
+    (t) => t.date < todayStr && t.status !== 'concluida' && t.status !== 'pulada'
   );
 
   if (overdueTasks.length === 0) return null;
@@ -25,9 +27,11 @@ export const BacklogWarning: React.FC = () => {
     setTimeout(() => {
       const result = rescheduleBacklog();
       setIsRescheduling(false);
-      setSuccessMsg(`${result.rescheduledCount} tarefas foram redistribuídas com sucesso nos seus próximos dias livres!`);
+      const msg = `${result.rescheduledCount} ${result.rescheduledCount === 1 ? 'tarefa foi redistribuída' : 'tarefas foram redistribuídas'} respeitando sua carga diária!`;
+      setSuccessMsg(msg);
+      showToast(msg, 'success');
       setTimeout(() => setSuccessMsg(null), 4000);
-    }, 400);
+    }, 350);
   };
 
   return (

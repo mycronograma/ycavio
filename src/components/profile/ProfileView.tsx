@@ -16,12 +16,14 @@ import {
   Moon,
   Monitor,
   Shield,
+  ShieldCheck,
   KeyRound,
   Zap,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
+import { useToast } from '../../context/ToastContext';
 import { StudyProfileType, StudyMethodId } from '../../types';
-import { getLevelProgress } from '../../services/scheduleEngine';
+import { getLevelProgress, getTodayStr } from '../../services/scheduleEngine';
 import { StudyMethodPreset } from '../../services/studyMethods';
 import { StudyMethodSelector } from '../common/StudyMethodSelector';
 import { useTheme } from '../../context/ThemeContext';
@@ -36,10 +38,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
   const {
     state,
     updateProfile,
+    useStreakFreeze,
     exportDataJSON,
     importDataJSON,
     resetAllData,
   } = useStudy();
+  const { showToast } = useToast();
   const { profile } = state;
   const { theme, setTheme } = useTheme();
 
@@ -224,6 +228,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
       profileType,
     });
     setSaveSuccess(true);
+    showToast('Configurações salvas e cronograma atualizado!', 'success');
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
@@ -236,6 +241,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
     link.download = `my-cronograma-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
+    showToast('Backup exportado em JSON!', 'success');
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -247,14 +253,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
       const success = importDataJSON(content);
       if (!success) {
         setImportError(true);
+        showToast('Arquivo de backup inválido.', 'error');
         setTimeout(() => setImportError(false), 3000);
       } else {
         setImportSuccess(true);
+        showToast('Backup restaurado com sucesso!', 'success');
         setTimeout(() => setImportSuccess(false), 3000);
       }
     };
     reader.readAsText(file);
   };
+
+  const handleUseStreakFreeze = () => {
+    const res = useStreakFreeze();
+    showToast(res.message, res.ok ? 'success' : 'info');
+  };
+
+  const todayStr = getTodayStr();
+  const freezeAvailable = profile.freezeStreakCount ?? 0;
+  const isProtectedToday = profile.lastActiveDate === todayStr;
 
   return (
     <div className="space-y-6 pb-12">
@@ -281,6 +298,48 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
             <span>{profile.streakDays} dias</span>
           </div>
         </div>
+      </div>
+
+      {/* Streak Freeze (Proteção de Sequência) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white p-5 shadow-xs dark:border-stone-800 dark:bg-stone-900">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-extrabold text-stone-900 dark:text-stone-100">
+                Escudo de Sequência (Streak Freeze)
+              </h3>
+              <span className="text-xs font-bold text-indigo-600 dark:text-cyan-400 tabular-nums">
+                {freezeAvailable} {freezeAvailable === 1 ? 'disponível' : 'disponíveis'}
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+              Não consegue estudar hoje? Use um escudo para proteger sua sequência de{' '}
+              <strong className="text-stone-700 dark:text-stone-200 tabular-nums">
+                {profile.streakDays} {profile.streakDays === 1 ? 'dia' : 'dias'}
+              </strong>{' '}
+              sem perder o ritmo.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleUseStreakFreeze}
+          disabled={freezeAvailable <= 0 || isProtectedToday || (profile.streakDays || 0) <= 0}
+          className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50 disabled:pointer-events-none dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/60 transition whitespace-nowrap shrink-0"
+        >
+          <ShieldCheck className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <span>
+            {isProtectedToday
+              ? 'Garantido hoje'
+              : freezeAvailable > 0
+              ? 'Ativar Escudo Hoje'
+              : 'Sem escudos'}
+          </span>
+        </button>
       </div>
 
       {/* Theme Appearance Card */}
@@ -740,6 +799,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onOpenOnboarding }) =>
                 onClick={() => {
                   resetAllData();
                   setConfirmReset(false);
+                  showToast('Dados resetados. Vamos recomeçar!', 'info');
                   onOpenOnboarding();
                 }}
                 className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-rose-700"

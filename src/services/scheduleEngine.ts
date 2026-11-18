@@ -68,6 +68,15 @@ export function getDailyCommitmentConflicts(
   return conflicts;
 }
 
+export const MAX_SCHEDULE_HORIZON_DAYS = 365;
+export const DEFAULT_NO_EXAM_HORIZON_DAYS = 30;
+
+// Helper to parse YYYY-MM-DD at local noon to avoid DST/UTC shifts
+export function parseScheduleDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0);
+}
+
 // Helper to format Date as YYYY-MM-DD in local time
 export function formatDate(date: Date): string {
   const year = date.getFullYear();
@@ -77,14 +86,92 @@ export function formatDate(date: Date): string {
 }
 
 export function addDays(dateStr: string, days: number): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
+  const date = parseScheduleDate(dateStr);
   date.setDate(date.getDate() + days);
   return formatDate(date);
 }
 
+export function diffDaysInclusive(startStr: string, endStr: string): number {
+  const start = parseScheduleDate(startStr);
+  const end = parseScheduleDate(endStr);
+  return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+}
+
 export function getTodayStr(): string {
   return formatDate(new Date());
+}
+
+export interface ScheduleHorizonInfo {
+  targetEndDate: string;
+  generatedEndDate: string;
+  totalDaysToTarget: number;
+  generatedDays: number;
+  isCapped: boolean;
+  hasCustomExamDate: boolean;
+}
+
+export function resolveScheduleEndDate(
+  profile: UserProfile,
+  fromDateStr: string = getTodayStr()
+): ScheduleHorizonInfo {
+  if (profile.examDate && /^\d{4}-\d{2}-\d{2}/.test(profile.examDate)) {
+    const cleanExamDate = profile.examDate.slice(0, 10);
+    const totalDays = diffDaysInclusive(fromDateStr, cleanExamDate);
+    if (totalDays >= 1) {
+      const generatedDays = Math.min(MAX_SCHEDULE_HORIZON_DAYS, Math.max(7, totalDays));
+      return {
+        targetEndDate: cleanExamDate,
+        generatedEndDate: addDays(fromDateStr, generatedDays - 1),
+        totalDaysToTarget: totalDays,
+        generatedDays,
+        isCapped: totalDays > MAX_SCHEDULE_HORIZON_DAYS,
+        hasCustomExamDate: true,
+      };
+    }
+    return {
+      targetEndDate: addDays(fromDateStr, 6),
+      generatedEndDate: addDays(fromDateStr, 6),
+      totalDaysToTarget: 7,
+      generatedDays: 7,
+      isCapped: false,
+      hasCustomExamDate: true,
+    };
+  }
+
+  if (profile.targetTotalHours && profile.targetTotalHours > 0) {
+    const activeDays = profile.availableDays?.length ? profile.availableDays : [1, 2, 3, 4, 5];
+    const weeklyMinutes = activeDays.reduce(
+      (sum, dow) => sum + Math.max(30, profile.dailyMinutesByDay?.[dow] ?? profile.dailyAvailableMinutes ?? 120),
+      0
+    );
+    const estimatedDays = Math.ceil(((profile.targetTotalHours * 60) / Math.max(60, weeklyMinutes)) * 7);
+    const totalDays = Math.max(DEFAULT_NO_EXAM_HORIZON_DAYS, estimatedDays);
+    const generatedDays = Math.min(MAX_SCHEDULE_HORIZON_DAYS, totalDays);
+    return {
+      targetEndDate: addDays(fromDateStr, totalDays - 1),
+      generatedEndDate: addDays(fromDateStr, generatedDays - 1),
+      totalDaysToTarget: totalDays,
+      generatedDays,
+      isCapped: totalDays > MAX_SCHEDULE_HORIZON_DAYS,
+      hasCustomExamDate: false,
+    };
+  }
+
+  return {
+    targetEndDate: addDays(fromDateStr, DEFAULT_NO_EXAM_HORIZON_DAYS - 1),
+    generatedEndDate: addDays(fromDateStr, DEFAULT_NO_EXAM_HORIZON_DAYS - 1),
+    totalDaysToTarget: DEFAULT_NO_EXAM_HORIZON_DAYS,
+    generatedDays: DEFAULT_NO_EXAM_HORIZON_DAYS,
+    isCapped: false,
+    hasCustomExamDate: false,
+  };
+}
+
+export function resolveScheduleHorizonDays(
+  profile: UserProfile,
+  fromDateStr: string = getTodayStr()
+): number {
+  return resolveScheduleEndDate(profile, fromDateStr).generatedDays;
 }
 
 /**
@@ -233,37 +320,84 @@ export function selectNextTopicForSubject(subject: Subject): { id?: string; name
   return { id: sorted[0].id, name: `Aprofundamento: ${sorted[0].name}` };
 }
 
+export function selectRotatingTopicForSubject(
+  subject: Subject,
+  occurrenceIndex: number
+): { id?: string; name: string } {
+  if (!subject.topics || subject.topics.length === 0) {
+    return { name: subject.pareiEm?.trim() || subject.name };
+  }
+
+  const uncompleted = subject.topics.filter((t) => !t.completed);
+  const completedSorted = subject.topics
+    .filter((t) => t.completed)
+    .sort((a, b) => {
+      const timeA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+      const timeB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+      return timeA - timeB;
+    });
+
+  const ordered = [...uncompleted, ...completedSorted];
+  const idx = occurrenceIndex % ordered.length;
+  const cycleNumber = Math.floor(occurrenceIndex / ordered.length);
+  const picked = ordered[idx];
+
+  if (picked.completed) {
+    return { id: picked.id, name: `Aprofundamento: ${picked.name}` };
+  }
+  if (cycleNumber > 0) {
+    return { id: picked.id, name: `Revisão e Prática: ${picked.name}` };
+  }
+  return { id: picked.id, name: picked.name };
+}
+
 /**
  * Core Smart Schedule Generator:
- * Generates tasks for the next N days (default 7-14 days).
+ * Generates tasks for the full target horizon (up to examDate, capped safely at 365 days).
  * Respects:
  * - Available days of the week (e.g. Mon, Wed, Fri)
  * - Daily available time (split into blocks matching preferredSessionLength)
  * - Spaced reviews due on that date
  * - Priority-based subject distribution with interleaved anti-fatigue balance
+ * - Progressive topic advancement across the entire period
  */
 export function generateSmartSchedule(
   profile: UserProfile,
   subjects: Subject[],
   existingReviews: SpacedReview[],
   existingTasks: Task[] = [],
-  daysAhead: number = 7,
-  fixedCommitments: FixedCommitment[] = []
+  daysAhead?: number,
+  fixedCommitments: FixedCommitment[] = [],
+  options?: {
+    startOffsetDays?: number;
+    initialSubjectCounts?: Record<string, number>;
+    initialTopicCursors?: Record<string, number>;
+    initialLastSubjectId?: string | null;
+    preserveAllFutureTasks?: boolean;
+  }
 ): Task[] {
   if (subjects.length === 0) return [];
 
   const todayStr = getTodayStr();
-  const today = new Date();
-
-  // Keep tasks from the past or already completed today
-  const preservedTasks = existingTasks.filter(
-    (t) => t.date < todayStr || (t.date === todayStr && t.status === 'concluida')
+  const resolvedDays = Math.min(
+    MAX_SCHEDULE_HORIZON_DAYS,
+    Math.max(1, daysAhead ?? resolveScheduleHorizonDays(profile, todayStr))
   );
+  const startOffset = Math.max(0, options?.startOffsetDays ?? 0);
+
+  // Keep tasks from the past or already completed today (or all existing if extending)
+  const preservedTasks = options?.preserveAllFutureTasks
+    ? existingTasks
+    : existingTasks.filter(
+        (t) => t.date < todayStr || (t.date === todayStr && t.status === 'concluida')
+      );
 
   // Identify any overdue pending tasks from yesterday or before to roll forward
-  const overdueTasks = existingTasks.filter(
-    (t) => t.date < todayStr && (t.status === 'pendente' || t.status === 'atrasada')
-  );
+  const overdueTasks = options?.preserveAllFutureTasks
+    ? []
+    : existingTasks.filter(
+        (t) => t.date < todayStr && (t.status === 'pendente' || t.status === 'atrasada')
+      );
 
   const newScheduleTasks: Task[] = [];
   const methodPreset = getStudyMethodPreset(profile.studyMethod);
@@ -271,23 +405,32 @@ export function generateSmartSchedule(
   const minSlotMinutes = Math.min(25, sessionLength);
   const fallbackDailyTime = Math.max(sessionLength, profile.dailyAvailableMinutes || 120);
 
+  // Precompute blocked minutes by day of week (0..6)
+  const blockedByDow: Record<number, number> = {};
+  for (let d = 0; d < 7; d++) {
+    blockedByDow[d] = calculateCommittedMinutesForDay(fixedCommitments, d);
+  }
+
   // Sort subjects by initial priority score
   const prioritizedSubjects = subjects.map((sub) => ({
     subject: sub,
     priority: calculateSubjectPriority(sub, todayStr, profile.examDate),
   }));
 
-  // Track subject frequencies to maintain healthy variety (anti-fatigue)
+  // Track subject frequencies & topic progression across the full horizon
   const subjectStudyCount: Record<string, number> = {};
-  subjects.forEach((s) => (subjectStudyCount[s.id] = 0));
+  const subjectTopicCursor: Record<string, number> = {};
+  subjects.forEach((s) => {
+    subjectStudyCount[s.id] = options?.initialSubjectCounts?.[s.id] ?? 0;
+    subjectTopicCursor[s.id] = options?.initialTopicCursors?.[s.id] ?? 0;
+  });
 
-  let lastSubjectIdUsed: string | null = null;
+  let lastSubjectIdUsed: string | null = options?.initialLastSubjectId ?? null;
   let globalSlotCounter = 0;
 
-  for (let i = 0; i < daysAhead; i++) {
-    const targetDate = new Date(today);
-    targetDate.setDate(targetDate.getDate() + i);
-    const dateStr = formatDate(targetDate);
+  for (let i = startOffset; i < resolvedDays; i++) {
+    const dateStr = addDays(todayStr, i);
+    const targetDate = parseScheduleDate(dateStr);
     const dayOfWeek = targetDate.getDay(); // 0 = Sun, 1 = Mon...
 
     // Check if user is available on this day
@@ -297,7 +440,7 @@ export function generateSmartSchedule(
     }
 
     const rawDayMinutes = profile.dailyMinutesByDay?.[dayOfWeek] ?? fallbackDailyTime;
-    const blockedMinutes = calculateCommittedMinutesForDay(fixedCommitments, dayOfWeek);
+    const blockedMinutes = blockedByDow[dayOfWeek] || 0;
     const netAwakeMinutes = Math.max(0, AWAKE_MINUTES_PER_DAY - blockedMinutes);
     const effectiveDayMinutes =
       blockedMinutes > 0 && netAwakeMinutes < rawDayMinutes
@@ -390,7 +533,10 @@ export function generateSmartSchedule(
         .sort((a, b) => b.score - a.score);
 
       const chosen = candidates[0].subject;
-      const topicInfo = selectNextTopicForSubject(chosen);
+      const cursor = subjectTopicCursor[chosen.id] || 0;
+      const topicInfo = selectRotatingTopicForSubject(chosen, cursor);
+      subjectTopicCursor[chosen.id] = cursor + 1;
+
       const taskType = selectTaskTypeByMethod(methodPreset, chosen, globalSlotCounter);
       const taskDuration = Math.min(sessionLength, remainingMinutesToday);
 
@@ -427,6 +573,70 @@ export function generateSmartSchedule(
     taskMap.set(t.id, t);
   }
   return Array.from(taskMap.values());
+}
+
+/**
+ * Extends an existing schedule forward until the target horizon (e.g. from 7 days out to examDate)
+ * without regenerating or altering today's or near-term existing tasks.
+ */
+export function extendScheduleToHorizon(
+  profile: UserProfile,
+  subjects: Subject[],
+  existingReviews: SpacedReview[],
+  currentTasks: Task[],
+  fixedCommitments: FixedCommitment[] = []
+): Task[] {
+  if (subjects.length === 0) return currentTasks;
+
+  const todayStr = getTodayStr();
+  const horizonInfo = resolveScheduleEndDate(profile, todayStr);
+
+  const futureTasks = currentTasks.filter((t) => t.date >= todayStr);
+  const latestFutureDate = futureTasks.reduce(
+    (max, t) => (t.date > max ? t.date : max),
+    todayStr
+  );
+
+  // If schedule already reaches within 2 days of generatedEndDate, keep as-is
+  if (futureTasks.length > 0 && latestFutureDate >= addDays(horizonInfo.generatedEndDate, -2)) {
+    return currentTasks;
+  }
+
+  const startOffset =
+    futureTasks.length > 0
+      ? Math.max(0, diffDaysInclusive(todayStr, latestFutureDate))
+      : 0;
+
+  if (startOffset >= horizonInfo.generatedDays) {
+    return currentTasks;
+  }
+
+  const initialSubjectCounts: Record<string, number> = {};
+  const initialTopicCursors: Record<string, number> = {};
+  for (const task of futureTasks) {
+    initialSubjectCounts[task.subjectId] = (initialSubjectCounts[task.subjectId] || 0) + 1;
+    if (!task.isSpacedReview) {
+      initialTopicCursors[task.subjectId] = (initialTopicCursors[task.subjectId] || 0) + 1;
+    }
+  }
+  const sortedFuture = [...futureTasks].sort((a, b) => a.date.localeCompare(b.date));
+  const lastSubjectId = sortedFuture.length > 0 ? sortedFuture[sortedFuture.length - 1].subjectId : null;
+
+  return generateSmartSchedule(
+    profile,
+    subjects,
+    existingReviews,
+    currentTasks,
+    horizonInfo.generatedDays,
+    fixedCommitments,
+    {
+      startOffsetDays: startOffset,
+      initialSubjectCounts,
+      initialTopicCursors,
+      initialLastSubjectId: lastSubjectId,
+      preserveAllFutureTasks: true,
+    }
+  );
 }
 
 /**

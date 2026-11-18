@@ -4,6 +4,7 @@ import {
   AppState,
   Subject,
   Task,
+  SpacedReview,
   UserProfile,
   StudySession,
   QuestionLog,
@@ -23,14 +24,22 @@ import {
   rolloverDailyGoalIfNeeded,
   loadActiveTimerDraft,
   saveActiveTimerDraft,
+  pruneSessions,
+  pruneNotifications,
   STUDY_PRESETS,
 } from '../services/storageService';
 import {
   generateSmartSchedule,
+  extendScheduleToHorizon,
+  resolveScheduleHorizonDays,
+  resolveScheduleEndDate,
   calculateNextSpacedReview,
   getLevelForXP,
   getTodayStr,
   addDays,
+  formatDate,
+  selectNextTopicForSubject,
+  calculateCommittedMinutesForDay,
 } from '../services/scheduleEngine';
 import {
   supabase,
@@ -77,6 +86,9 @@ interface StudyContextValue {
     topics: string[];
   }) => void;
   updateSubject: (updatedSub: Subject) => void;
+  toggleSubjectTopic: (subjectId: string, topicId: string) => boolean;
+  loadSuggestedTopicsForSubject: (subjectId: string, topicNames: string[]) => number;
+  reorderSubjects: (fromIndex: number, toIndex: number) => void;
   deleteSubject: (subjectId: string) => void;
   updateSubjectSpreadsheetField: (
     subjectId: string,
@@ -88,6 +100,7 @@ interface StudyContextValue {
   completeSpacedReview: (reviewId: string, rating: 'facil' | 'medio' | 'dificil') => void;
   completeOnboarding: (profile: Partial<UserProfile>, subjects: Subject[]) => void;
   updateProfile: (profile: Partial<UserProfile>) => void;
+  useStreakFreeze: () => { ok: boolean; message: string; remaining: number };
   resetAllData: () => void;
   exportDataJSON: () => string;
   importDataJSON: (jsonStr: string) => boolean;
@@ -104,6 +117,7 @@ interface StudyContextValue {
   rescheduleBacklog: () => { rescheduledCount: number };
   saveFixedCommitments: (commitments: FixedCommitment[]) => void;
   markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
   clearAllNotifications: () => void;
   updateDailyGoalTargets: (targets: {
     targetMinutes?: number;
@@ -349,6 +363,44 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       window.removeEventListener('focus', checkDayRollover);
     };
   }, []);
+
+  // Automatically extend schedule forward up to chosen examDate / target horizon if needed
+  useEffect(() => {
+    if (!state.profile.onboardingCompleted || state.subjects.length === 0) return;
+    const todayStr = getTodayStr();
+    const horizon = resolveScheduleEndDate(state.profile, todayStr);
+    const futureTasks = state.tasks.filter((t) => t.date >= todayStr);
+    const latestFutureDate = futureTasks.reduce(
+      (max, t) => (t.date > max ? t.date : max),
+      todayStr
+    );
+
+    if (futureTasks.length === 0 || latestFutureDate < addDays(horizon.generatedEndDate, -2)) {
+      setState((prev) => {
+        if (!prev.profile.onboardingCompleted || prev.subjects.length === 0) return prev;
+        const extended = extendScheduleToHorizon(
+          prev.profile,
+          prev.subjects,
+          prev.reviews,
+          prev.tasks,
+          prev.fixedCommitments || []
+        );
+        if (extended.length === prev.tasks.length) return prev;
+        return {
+          ...prev,
+          tasks: extended,
+          lastScheduleGeneratedAt: new Date().toISOString(),
+        };
+      });
+    }
+  }, [
+    state.profile.onboardingCompleted,
+    state.profile.examDate,
+    state.profile.targetTotalHours,
+    state.subjects.length,
+    state.tasks,
+    state.profile,
+  ]);
 
   // Persist locally (user-scoped) and debounced diff-checked sync to cloud
   useEffect(() => {
@@ -650,7 +702,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           tasks: updatedTasks,
           subjects: updatedSubjects,
           reviews: updatedReviews,
-          sessions: [newSession, ...prev.sessions],
+          sessions: pruneSessions([newSession, ...prev.sessions], todayStr),
           dailyGoal: updatedDailyGoal,
           achievements: updatedAchievements,
         };
@@ -678,14 +730,52 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, []);
 
+  const mergeProtectedSchedule = useCallback(
+    (
+      profile: UserProfile,
+      subjects: Subject[],
+      reviews: SpacedReview[],
+      currentTasks: Task[],
+      fixedCommitments: FixedCommitment[]
+    ): Task[] => {
+      const activeDraftTaskId = loadActiveTimerDraft(activeUserIdRef.current)?.task.id;
+      const todayStr = getTodayStr();
+      const protectedTasks = currentTasks.filter(
+        (t) =>
+          t.status === 'concluida' ||
+          t.status === 'pulada' ||
+          t.status === 'em_andamento' ||
+          (activeDraftTaskId && t.id === activeDraftTaskId)
+      );
+      const generated = generateSmartSchedule(
+        profile,
+        subjects,
+        reviews,
+        currentTasks,
+        resolveScheduleHorizonDays(profile, todayStr),
+        fixedCommitments
+      );
+      const taskMap = new Map<string, Task>();
+      for (const t of generated) {
+        taskMap.set(t.id, t);
+      }
+      for (const t of protectedTasks) {
+        if (t.date >= todayStr || t.status === 'em_andamento' || (activeDraftTaskId && t.id === activeDraftTaskId)) {
+          taskMap.set(t.id, t);
+        }
+      }
+      return Array.from(taskMap.values());
+    },
+    []
+  );
+
   const recalculateSchedule = useCallback(() => {
     setState((prev) => {
-      const regeneratedTasks = generateSmartSchedule(
+      const regeneratedTasks = mergeProtectedSchedule(
         prev.profile,
         prev.subjects,
         prev.reviews,
         prev.tasks,
-        7,
         prev.fixedCommitments || []
       );
       return {
@@ -694,7 +784,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         lastScheduleGeneratedAt: new Date().toISOString(),
       };
     });
-  }, []);
+  }, [mergeProtectedSchedule]);
 
   const addSubject = useCallback(
     (newSub: {
@@ -731,12 +821,11 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
 
         const updatedSubjects = [...prev.subjects, createdSubject];
-        const updatedTasks = generateSmartSchedule(
+        const updatedTasks = mergeProtectedSchedule(
           prev.profile,
           updatedSubjects,
           prev.reviews,
           prev.tasks,
-          7,
           prev.fixedCommitments || []
         );
 
@@ -753,24 +842,211 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         };
       });
     },
-    []
+    [mergeProtectedSchedule]
   );
 
-  const updateSubject = useCallback((updatedSub: Subject) => {
+  const updateSubject = useCallback(
+    (updatedSub: Subject) => {
+      setState((prev) => {
+        const prevSub = prev.subjects.find((s) => s.id === updatedSub.id);
+        const updatedSubjects = prev.subjects.map((s) => (s.id === updatedSub.id ? updatedSub : s));
+
+        const nextTopic = selectNextTopicForSubject(updatedSub);
+        const completedTopicNames = new Set(
+          updatedSub.topics.filter((t) => t.completed).map((t) => t.name.toLowerCase())
+        );
+
+        const patchedTasks = prev.tasks.map((t) => {
+          if (t.subjectId !== updatedSub.id) return t;
+          const isPending = t.status === 'pendente' || t.status === 'atrasada';
+          const topicCompleted =
+            isPending && !t.isSpacedReview && completedTopicNames.has(t.topicName.toLowerCase());
+
+          return {
+            ...t,
+            subjectName: updatedSub.name,
+            subjectColor: updatedSub.color,
+            pareiEm: updatedSub.pareiEm,
+            ...(topicCompleted
+              ? {
+                  topicId: nextTopic.id,
+                  topicName: nextTopic.name,
+                }
+              : {}),
+          };
+        });
+
+        const patchedReviews = prev.reviews.map((r) =>
+          r.subjectId === updatedSub.id
+            ? { ...r, subjectName: updatedSub.name, subjectColor: updatedSub.color }
+            : r
+        );
+
+        const schedulingFactorsChanged =
+          !prevSub ||
+          prevSub.weight !== updatedSub.weight ||
+          prevSub.difficulty !== updatedSub.difficulty ||
+          prevSub.knowledgeLevel !== updatedSub.knowledgeLevel ||
+          prevSub.concluida !== updatedSub.concluida;
+
+        const updatedTasks = schedulingFactorsChanged
+          ? mergeProtectedSchedule(
+              prev.profile,
+              updatedSubjects,
+              patchedReviews,
+              patchedTasks,
+              prev.fixedCommitments || []
+            )
+          : patchedTasks;
+
+        return {
+          ...prev,
+          subjects: updatedSubjects,
+          reviews: patchedReviews,
+          tasks: updatedTasks,
+        };
+      });
+    },
+    [mergeProtectedSchedule]
+  );
+
+  const toggleSubjectTopic = useCallback((subjectId: string, topicId: string): boolean => {
+    const todayStr = getTodayStr();
+    const targetSub = state.subjects.find((s) => s.id === subjectId);
+    const targetTopic = targetSub?.topics.find((t) => t.id === topicId);
+    const nextCompleted = targetTopic ? !targetTopic.completed : true;
+
     setState((prev) => {
-      const updatedSubjects = prev.subjects.map((s) => (s.id === updatedSub.id ? updatedSub : s));
-      const updatedTasks = generateSmartSchedule(
-        prev.profile,
-        updatedSubjects,
-        prev.reviews,
-        prev.tasks,
-        7,
-        prev.fixedCommitments || []
-      );
+      let modifiedSub: Subject | null = null;
+      let toggledTopicName = '';
+
+      const updatedSubjects = prev.subjects.map((sub) => {
+        if (sub.id !== subjectId) return sub;
+        const updatedTopics = sub.topics.map((top) => {
+          if (top.id !== topicId) return top;
+          toggledTopicName = top.name;
+          const willComplete = !top.completed;
+          return {
+            ...top,
+            completed: willComplete,
+            completedAt: willComplete ? todayStr : undefined,
+          };
+        });
+        modifiedSub = { ...sub, topics: updatedTopics };
+        return modifiedSub;
+      });
+
+      if (!modifiedSub) return prev;
+      const nextTopic = selectNextTopicForSubject(modifiedSub);
+      const updatedTasks = prev.tasks.map((t) => {
+        if (
+          t.subjectId === subjectId &&
+          (t.status === 'pendente' || t.status === 'atrasada') &&
+          !t.isSpacedReview &&
+          nextCompleted &&
+          (t.topicId === topicId || t.topicName.toLowerCase() === toggledTopicName.toLowerCase())
+        ) {
+          return {
+            ...t,
+            topicId: nextTopic.id,
+            topicName: nextTopic.name,
+          };
+        }
+        return t;
+      });
+
       return {
         ...prev,
         subjects: updatedSubjects,
         tasks: updatedTasks,
+      };
+    });
+
+    return nextCompleted;
+  }, [state.subjects]);
+
+  const loadSuggestedTopicsForSubject = useCallback(
+    (subjectId: string, topicNames: string[]): number => {
+      const cleanIncoming = topicNames.map((t) => t.trim()).filter(Boolean);
+      if (cleanIncoming.length === 0) return 0;
+
+      const existingSub = state.subjects.find((s) => s.id === subjectId);
+      if (!existingSub) return 0;
+
+      const existingSet = new Set(existingSub.topics.map((t) => t.name.toLowerCase()));
+      const newNames = cleanIncoming.filter((name) => !existingSet.has(name.toLowerCase()));
+      if (newNames.length === 0) return 0;
+
+      setState((prev) => {
+        const stamp = Date.now();
+        let updatedSubjectRef: Subject | null = null;
+
+        const updatedSubjects = prev.subjects.map((sub) => {
+          if (sub.id !== subjectId) return sub;
+          const existingLower = new Set(sub.topics.map((t) => t.name.toLowerCase()));
+          const additions = cleanIncoming
+            .filter((name) => !existingLower.has(name.toLowerCase()))
+            .map((name, idx) => ({
+              id: `top-${sub.id}-${stamp}-${idx + 1}`,
+              name,
+              completed: false,
+            }));
+
+          updatedSubjectRef = {
+            ...sub,
+            topics: [...sub.topics, ...additions],
+          };
+          return updatedSubjectRef;
+        });
+
+        const nextTopic = updatedSubjectRef ? selectNextTopicForSubject(updatedSubjectRef) : null;
+        const updatedTasks = prev.tasks.map((t) => {
+          if (
+            nextTopic &&
+            t.subjectId === subjectId &&
+            (t.status === 'pendente' || t.status === 'atrasada') &&
+            !t.isSpacedReview &&
+            !t.topicId &&
+            t.topicName.toLowerCase() === (updatedSubjectRef?.name || '').toLowerCase()
+          ) {
+            return {
+              ...t,
+              topicId: nextTopic.id,
+              topicName: nextTopic.name,
+            };
+          }
+          return t;
+        });
+
+        return {
+          ...prev,
+          subjects: updatedSubjects,
+          tasks: updatedTasks,
+        };
+      });
+
+      return newNames.length;
+    },
+    [state.subjects]
+  );
+
+  const reorderSubjects = useCallback((fromIndex: number, toIndex: number) => {
+    setState((prev) => {
+      const list = [...prev.subjects];
+      if (
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= list.length ||
+        toIndex >= list.length ||
+        fromIndex === toIndex
+      ) {
+        return prev;
+      }
+      const [moved] = list.splice(fromIndex, 1);
+      list.splice(toIndex, 0, moved);
+      return {
+        ...prev,
+        subjects: list,
       };
     });
   }, []);
@@ -825,7 +1101,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         newSubjects,
         [],
         [],
-        7,
+        resolveScheduleHorizonDays(prev.profile),
         prev.fixedCommitments || []
       );
 
@@ -859,27 +1135,34 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, []);
 
-  const deleteSubject = useCallback((subjectId: string) => {
-    setState((prev) => {
-      const filteredSubjects = prev.subjects.filter((s) => s.id !== subjectId);
-      const filteredReviews = prev.reviews.filter((r) => r.subjectId !== subjectId);
-      const filteredTasks = prev.tasks.filter((t) => t.subjectId !== subjectId);
-      const updatedTasks = generateSmartSchedule(
-        prev.profile,
-        filteredSubjects,
-        filteredReviews,
-        filteredTasks,
-        7,
-        prev.fixedCommitments || []
-      );
-      return {
-        ...prev,
-        subjects: filteredSubjects,
-        reviews: filteredReviews,
-        tasks: updatedTasks,
-      };
-    });
-  }, []);
+  const deleteSubject = useCallback(
+    (subjectId: string) => {
+      const existingDraft = loadActiveTimerDraft(activeUserIdRef.current);
+      if (existingDraft && existingDraft.task.subjectId === subjectId) {
+        saveActiveTimerDraft(null, activeUserIdRef.current);
+        setActiveTimerDraft(null);
+      }
+      setState((prev) => {
+        const filteredSubjects = prev.subjects.filter((s) => s.id !== subjectId);
+        const filteredReviews = prev.reviews.filter((r) => r.subjectId !== subjectId);
+        const filteredTasks = prev.tasks.filter((t) => t.subjectId !== subjectId);
+        const updatedTasks = mergeProtectedSchedule(
+          prev.profile,
+          filteredSubjects,
+          filteredReviews,
+          filteredTasks,
+          prev.fixedCommitments || []
+        );
+        return {
+          ...prev,
+          subjects: filteredSubjects,
+          reviews: filteredReviews,
+          tasks: updatedTasks,
+        };
+      });
+    },
+    [mergeProtectedSchedule]
+  );
 
   const completeSpacedReview = useCallback(
     (reviewId: string, rating: 'facil' | 'medio' | 'dificil') => {
@@ -960,7 +1243,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           subjects,
           prev.reviews,
           [],
-          7,
+          resolveScheduleHorizonDays(finalProfile, todayStr),
           prev.fixedCommitments || []
         );
 
@@ -995,32 +1278,34 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [triggerCelebration]
   );
 
-  const updateProfile = useCallback((profileChanges: Partial<UserProfile>) => {
-    setState((prev) => {
-      const updatedProfile = { ...prev.profile, ...profileChanges };
-      const todayDow = new Date().getDay();
-      const todayTargetMinutes =
-        updatedProfile.dailyMinutesByDay?.[todayDow] ?? updatedProfile.dailyAvailableMinutes;
-      const updatedTasks = generateSmartSchedule(
-        updatedProfile,
-        prev.subjects,
-        prev.reviews,
-        prev.tasks,
-        7,
-        prev.fixedCommitments || []
-      );
-      return {
-        ...prev,
-        profile: updatedProfile,
-        tasks: updatedTasks,
-        dailyGoal: {
-          ...prev.dailyGoal,
-          targetMinutes: todayTargetMinutes,
-          targetTasks: Math.max(1, Math.floor(todayTargetMinutes / updatedProfile.preferredSessionLength)),
-        },
-      };
-    });
-  }, []);
+  const updateProfile = useCallback(
+    (profileChanges: Partial<UserProfile>) => {
+      setState((prev) => {
+        const updatedProfile = { ...prev.profile, ...profileChanges };
+        const todayDow = new Date().getDay();
+        const todayTargetMinutes =
+          updatedProfile.dailyMinutesByDay?.[todayDow] ?? updatedProfile.dailyAvailableMinutes;
+        const updatedTasks = mergeProtectedSchedule(
+          updatedProfile,
+          prev.subjects,
+          prev.reviews,
+          prev.tasks,
+          prev.fixedCommitments || []
+        );
+        return {
+          ...prev,
+          profile: updatedProfile,
+          tasks: updatedTasks,
+          dailyGoal: {
+            ...prev.dailyGoal,
+            targetMinutes: todayTargetMinutes,
+            targetTasks: Math.max(1, Math.floor(todayTargetMinutes / updatedProfile.preferredSessionLength)),
+          },
+        };
+      });
+    },
+    [mergeProtectedSchedule]
+  );
 
   const resetAllData = useCallback(() => {
     setActiveTimerDraft(null);
@@ -1111,7 +1396,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ...prev,
           subjects: updatedSubjects,
           questionLogs: [newLog, ...(prev.questionLogs || [])],
-          notifications: [newNotif, ...(prev.notifications || [])],
+          notifications: pruneNotifications([newNotif, ...(prev.notifications || [])], getTodayStr()),
           profile: {
             ...prev.profile,
             xp: newXP,
@@ -1126,41 +1411,69 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const rescheduleBacklog = useCallback(() => {
     const todayStr = getTodayStr();
-    let rescheduledCount = 0;
+    const snapshotOverdue = state.tasks.filter(
+      (t) => t.date < todayStr && t.status !== 'concluida' && t.status !== 'pulada'
+    );
+    const rescheduledCount = snapshotOverdue.length;
 
     setState((prev) => {
-      const overdueTasks = prev.tasks.filter(
-        (t) => t.date < todayStr && t.status !== 'concluida'
-      );
+      const overdueTasks = prev.tasks
+        .filter((t) => t.date < todayStr && t.status !== 'concluida' && t.status !== 'pulada')
+        .sort((a, b) => (b.priorityScore || 0) - (a.priorityScore || 0));
       if (overdueTasks.length === 0) return prev;
 
-      rescheduledCount = overdueTasks.length;
       const availableDays =
         prev.profile.availableDays.length > 0 ? prev.profile.availableDays : [1, 2, 3, 4, 5];
-      let dayOffset = 0;
-      let targetDate = todayStr;
 
       const nonOverdueTasks = prev.tasks.filter(
-        (t) => !(t.date < todayStr && t.status !== 'concluida')
+        (t) => !(t.date < todayStr && t.status !== 'concluida' && t.status !== 'pulada')
       );
 
-      const movedTasks = overdueTasks.map((task) => {
-        let d = new Date();
-        d.setDate(d.getDate() + dayOffset);
-        while (!availableDays.includes(d.getDay())) {
-          dayOffset++;
-          d = new Date();
-          d.setDate(d.getDate() + dayOffset);
+      // Track already committed minutes & tasks per date from today onward
+      const minutesUsedByDate: Record<string, number> = {};
+      const taskCountByDate: Record<string, number> = {};
+      for (const task of nonOverdueTasks) {
+        if (task.date >= todayStr && task.status !== 'pulada') {
+          minutesUsedByDate[task.date] = (minutesUsedByDate[task.date] || 0) + (task.durationMinutes || 0);
+          taskCountByDate[task.date] = (taskCountByDate[task.date] || 0) + 1;
         }
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        targetDate = `${y}-${m}-${day}`;
-        dayOffset++;
+      }
+
+      const getDayCapacity = (dow: number): number => {
+        const rawMinutes = prev.profile.dailyMinutesByDay?.[dow] ?? prev.profile.dailyAvailableMinutes ?? 120;
+        const blocked = calculateCommittedMinutesForDay(prev.fixedCommitments || [], dow);
+        const netAwake = Math.max(0, 16 * 60 - blocked);
+        return blocked > 0 && netAwake < rawMinutes ? Math.max(0, netAwake) : Math.max(30, rawMinutes);
+      };
+
+      const movedTasks: Task[] = overdueTasks.map((task) => {
+        const duration = Math.max(15, task.durationMinutes || 50);
+        let chosenDate = todayStr;
+
+        const maxOffset = Math.max(180, resolveScheduleHorizonDays(prev.profile, todayStr));
+        for (let offset = 0; offset < maxOffset; offset++) {
+          const d = new Date();
+          d.setDate(d.getDate() + offset);
+          const dow = d.getDay();
+          if (!availableDays.includes(dow)) continue;
+
+          const dateStr = formatDate(d);
+          const cap = getDayCapacity(dow);
+          const used = minutesUsedByDate[dateStr] || 0;
+          const count = taskCountByDate[dateStr] || 0;
+          const remaining = Math.max(0, cap - used);
+
+          if (remaining >= duration || count === 0) {
+            chosenDate = dateStr;
+            minutesUsedByDate[dateStr] = used + duration;
+            taskCountByDate[dateStr] = count + 1;
+            break;
+          }
+        }
 
         return {
           ...task,
-          date: targetDate,
+          date: chosenDate,
           status: 'pendente' as const,
         };
       });
@@ -1168,7 +1481,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const newNotif: InAppNotification = {
         id: `notif-backlog-${Date.now()}`,
         title: 'Atrasos Reagendados ⚡',
-        message: `${rescheduledCount} tarefas pendentes foram redistribuídas nos seus próximos dias disponíveis.`,
+        message: `${overdueTasks.length} tarefas pendentes foram redistribuídas respeitando seu limite diário.`,
         date: todayStr,
         read: false,
         type: 'backlog',
@@ -1177,12 +1490,73 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return {
         ...prev,
         tasks: [...nonOverdueTasks, ...movedTasks],
-        notifications: [newNotif, ...(prev.notifications || [])],
+        notifications: pruneNotifications([newNotif, ...(prev.notifications || [])], todayStr),
       };
     });
 
     return { rescheduledCount };
-  }, []);
+  }, [state.tasks]);
+
+  const useStreakFreeze = useCallback(() => {
+    const todayStr = getTodayStr();
+    const available = state.profile.freezeStreakCount ?? 0;
+
+    if (available <= 0) {
+      return {
+        ok: false,
+        message: 'Você não possui escudos de sequência disponíveis no momento.',
+        remaining: 0,
+      };
+    }
+
+    if ((state.profile.streakDays || 0) <= 0) {
+      return {
+        ok: false,
+        message: 'Conclua 1 sessão para iniciar sua sequência antes de ativar o escudo.',
+        remaining: available,
+      };
+    }
+
+    if (state.profile.lastActiveDate === todayStr) {
+      return {
+        ok: false,
+        message: 'Sua sequência de hoje já está garantida!',
+        remaining: available,
+      };
+    }
+
+    const nextRemaining = Math.max(0, available - 1);
+    setState((prev) => {
+      const currentFreeze = prev.profile.freezeStreakCount ?? 0;
+      if (currentFreeze <= 0 || prev.profile.lastActiveDate === todayStr || (prev.profile.streakDays || 0) <= 0) {
+        return prev;
+      }
+      const remainingAfter = Math.max(0, currentFreeze - 1);
+      const freezeNotif: InAppNotification = {
+        id: `notif-freeze-${Date.now()}`,
+        title: 'Escudo de Sequência Ativado 🛡️',
+        message: `Sua sequência de ${prev.profile.streakDays} dias foi protegida hoje. Restam ${remainingAfter} escudos.`,
+        date: todayStr,
+        read: false,
+        type: 'streak',
+      };
+      return {
+        ...prev,
+        profile: {
+          ...prev.profile,
+          freezeStreakCount: remainingAfter,
+          lastActiveDate: todayStr,
+        },
+        notifications: pruneNotifications([freezeNotif, ...(prev.notifications || [])], todayStr),
+      };
+    });
+
+    return {
+      ok: true,
+      message: `Sequência de ${state.profile.streakDays} dias protegida hoje! Restam ${nextRemaining} escudos.`,
+      remaining: nextRemaining,
+    };
+  }, [state.profile.freezeStreakCount, state.profile.lastActiveDate, state.profile.streakDays]);
 
   const saveFixedCommitments = useCallback((commitments: FixedCommitment[]) => {
     setState((prev) => ({
@@ -1198,10 +1572,17 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }));
   }, []);
 
-  const clearAllNotifications = useCallback(() => {
+  const markAllNotificationsRead = useCallback(() => {
     setState((prev) => ({
       ...prev,
       notifications: (prev.notifications || []).map((n) => ({ ...n, read: true })),
+    }));
+  }, []);
+
+  const clearAllNotifications = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      notifications: [],
     }));
   }, []);
 
@@ -1491,6 +1872,9 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         recalculateSchedule,
         addSubject,
         updateSubject,
+        toggleSubjectTopic,
+        loadSuggestedTopicsForSubject,
+        reorderSubjects,
         deleteSubject,
         updateSubjectSpreadsheetField,
         advanceAllCycles,
@@ -1498,6 +1882,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         completeSpacedReview,
         completeOnboarding,
         updateProfile,
+        useStreakFreeze,
         resetAllData,
         exportDataJSON,
         importDataJSON,
@@ -1506,6 +1891,7 @@ export const StudyProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         rescheduleBacklog,
         saveFixedCommitments,
         markNotificationRead,
+        markAllNotificationsRead,
         clearAllNotifications,
         updateDailyGoalTargets,
         addCustomDailyGoal,

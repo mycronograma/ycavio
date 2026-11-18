@@ -5,17 +5,16 @@ import {
   Play,
   RotateCw,
   CheckCircle2,
-  Circle,
-  HelpCircle,
   Sparkles,
-  Info,
-  Edit2,
   Trash2,
-  ArrowRight,
   BookOpen,
   Target,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useStudy } from '../../context/StudyContext';
+import { useToast } from '../../context/ToastContext';
 import { Subject, Task } from '../../types';
 import { QuestionLogModal } from '../analytics/QuestionLogModal';
 import { formatTimerClock } from '../study/ActiveStudyModal';
@@ -29,12 +28,14 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ onOpenPresets 
     state,
     activeTimerDraft,
     updateSubjectSpreadsheetField,
+    reorderSubjects,
     advanceAllCycles,
     startStudySession,
     resumePausedTimer,
     addSubject,
     deleteSubject,
   } = useStudy();
+  const { showToast } = useToast();
   const { subjects, profile } = state;
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -42,12 +43,15 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ onOpenPresets 
   const [targetSubId, setTargetSubId] = useState<string | undefined>(undefined);
   const [confirmAdvanceCycle, setConfirmAdvanceCycle] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [dragHandleIndex, setDragHandleIndex] = useState<number | null>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   const [newSubName, setNewSubName] = useState('');
   const [newSubParei, setNewSubParei] = useState('');
   const [newSubRevisao, setNewSubRevisao] = useState('');
   const [newSubCaderno, setNewSubCaderno] = useState('');
-  const [newSubWeight, setNewSubWeight] = useState(4);
+  const [newSubWeight] = useState(4);
 
   const handleCreateSubject = (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +66,7 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ onOpenPresets 
       topics: newSubParei.trim() ? [newSubParei.trim()] : [],
     });
 
+    showToast(`"${newSubName.trim()}" adicionada à planilha!`, 'success');
     setIsAddModalOpen(false);
     setNewSubName('');
     setNewSubParei('');
@@ -125,8 +130,10 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ onOpenPresets 
                 <button
                   type="button"
                   onClick={() => {
+                    const nextCiclo = (profile.globalCiclo ?? 0) + 1;
                     advanceAllCycles();
                     setConfirmAdvanceCycle(false);
+                    showToast(`Ciclo ${nextCiclo} iniciado! Revise os pontos anotados.`, 'success');
                   }}
                   className="rounded-lg bg-amber-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-amber-700"
                 >
@@ -230,6 +237,7 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ onOpenPresets 
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-[#1b4d6b] text-white font-black tracking-wider uppercase text-[11px]">
+                <th className="py-3.5 px-2.5 w-20 text-center">Ordem</th>
                 <th className="py-3.5 px-4 w-12 text-center">Ação</th>
                 <th className="py-3.5 px-4 min-w-[200px]">MATÉRIAS</th>
                 <th className="py-3.5 px-3 w-16 text-center">PESO</th>
@@ -242,18 +250,92 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ onOpenPresets 
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-              {subjects.map((sub) => {
+              {subjects.map((sub, idx) => {
                 const subjectDraft =
                   activeTimerDraft && activeTimerDraft.task.subjectId === sub.id
                     ? activeTimerDraft
                     : null;
+                const isDragging = draggedIndex === idx;
+                const isDropTarget = dragOverIndex === idx && draggedIndex !== null && draggedIndex !== idx;
                 return (
                   <tr
                     key={sub.id}
+                    draggable={dragHandleIndex === idx}
+                    onDragStart={(e) => {
+                      setDraggedIndex(idx);
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', String(idx));
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverIndex !== idx) {
+                        setDragOverIndex(idx);
+                      }
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverIndex === idx) {
+                        setDragOverIndex(null);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggedIndex !== null && draggedIndex !== idx) {
+                        reorderSubjects(draggedIndex, idx);
+                        showToast('Ordem das matérias atualizada.', 'info');
+                      }
+                      setDraggedIndex(null);
+                      setDragOverIndex(null);
+                      setDragHandleIndex(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedIndex(null);
+                      setDragOverIndex(null);
+                      setDragHandleIndex(null);
+                    }}
                     className={`transition-colors hover:bg-stone-50/80 dark:hover:bg-stone-800/40 ${
                       sub.concluida ? 'bg-emerald-50/30 dark:bg-emerald-950/20' : ''
+                    } ${isDragging ? 'opacity-50' : ''} ${
+                      isDropTarget
+                        ? 'ring-2 ring-inset ring-indigo-500 bg-indigo-50/40 dark:ring-cyan-400 dark:bg-cyan-950/20'
+                        : ''
                     }`}
                   >
+                    {/* Ordem: drag handle + up/down buttons */}
+                    <td className="py-3 px-2 text-center">
+                      <div className="inline-flex items-center gap-1">
+                        <span
+                          onMouseDown={() => setDragHandleIndex(idx)}
+                          onMouseUp={() => setDragHandleIndex(null)}
+                          title="Arrastar para reordenar"
+                          className="cursor-grab active:cursor-grabbing p-1 rounded-md text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:text-stone-500 dark:hover:bg-stone-800 dark:hover:text-stone-200 transition"
+                        >
+                          <GripVertical className="h-3.5 w-3.5" />
+                        </span>
+                        <div className="flex flex-col">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => reorderSubjects(idx, idx - 1)}
+                            title="Mover para cima"
+                            aria-label={`Mover ${sub.name} para cima`}
+                            className="p-0.5 rounded text-stone-400 hover:text-indigo-600 disabled:opacity-25 disabled:pointer-events-none dark:hover:text-cyan-400 transition"
+                          >
+                            <ArrowUp className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === subjects.length - 1}
+                            onClick={() => reorderSubjects(idx, idx + 1)}
+                            title="Mover para baixo"
+                            aria-label={`Mover ${sub.name} para baixo`}
+                            className="p-0.5 rounded text-stone-400 hover:text-indigo-600 disabled:opacity-25 disabled:pointer-events-none dark:hover:text-cyan-400 transition"
+                          >
+                            <ArrowDown className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </td>
                     {/* Action: Start Studying or Continue Paused Session */}
                     <td className="py-3 px-3 text-center">
                       {subjectDraft ? (
@@ -402,6 +484,7 @@ export const SpreadsheetView: React.FC<SpreadsheetViewProps> = ({ onOpenPresets 
                             onClick={() => {
                               deleteSubject(sub.id);
                               setConfirmDeleteId(null);
+                              showToast(`Matéria "${sub.name}" removida.`, 'info');
                             }}
                             className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white hover:bg-rose-700"
                           >

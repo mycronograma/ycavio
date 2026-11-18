@@ -1,6 +1,7 @@
-import { AppState, Subject, Achievement, UserProfile, UserAccount, DailyGoal, StudySession, Task, ActiveTimerDraft } from '../types';
-import { getTodayStr } from './scheduleEngine';
+import { AppState, Subject, Achievement, UserProfile, UserAccount, DailyGoal, StudySession, Task, ActiveTimerDraft, InAppNotification } from '../types';
+import { addDays, getTodayStr } from './scheduleEngine';
 import { isValidStudyMethodId } from './studyMethods';
+import { findSuggestedTopicsForSubject } from './presetTopics';
 
 export interface PresetModule {
   id: string;
@@ -38,7 +39,7 @@ export interface PresetGoal {
   modules?: PresetModule[];
 }
 
-export const STUDY_PRESETS: PresetGoal[] = [
+const RAW_STUDY_PRESETS: PresetGoal[] = [
   {
     id: 'enem',
     name: 'ENEM',
@@ -57,7 +58,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Razão, Proporção e Porcentagem',
+          'Funções do 1º e 2º Grau',
+          'Função Exponencial e Logarítmica',
+          'Geometria Plana (Áreas e Triângulos)',
+          'Geometria Espacial (Prismas, Cilindros e Esferas)',
+          'Trigonometria Básica e Ciclo Trigonométrico',
+          'Análise Combinatória e Probabilidade',
+          'Estatística (Média, Mediana, Moda e Gráficos)',
+        ],
       },
       {
         name: 'Redação',
@@ -65,7 +75,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Competência 1 e 2: Norma Culta e Repertório',
+          'Competência 3 e 4: Projeto de Texto e Coesão',
+          'Competência 5: Proposta de Intervenção Completa',
+          'Introdução com Contextualização e Tese',
+          'Desenvolvimento: Argumentação e Causa-Consequência',
+          'Eixo Social: Desigualdade, Educação e Saúde',
+          'Eixo Tecnológico, Ambiental e Cidadania',
+        ],
       },
       {
         name: 'Língua Portuguesa',
@@ -73,7 +91,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Interpretação e Compreensão Textual',
+          'Gêneros e Tipos Textuais',
+          'Morfologia e Classes de Palavras',
+          'Sintaxe do Período Simples e Composto',
+          'Concordância Verbal e Nominal',
+          'Regência Verbal, Nominal e Crase',
+          'Pontuação e Semântica (Coesão e Coerência)',
+          'Variação Linguística e Funções da Linguagem',
+        ],
       },
       {
         name: 'Literatura',
@@ -81,7 +108,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Quinhentismo, Barroco e Arcadismo',
+          'Romantismo (Poesia e Prosa)',
+          'Realismo, Naturalismo e Machado de Assis',
+          'Parnasianismo e Simbolismo',
+          'Pré-Modernismo Brasileiro',
+          'Modernismo (1ª, 2ª e 3ª Gerações)',
+          'Literatura Contemporânea e Poesia Social',
+        ],
       },
       {
         name: 'Artes',
@@ -89,7 +124,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 2,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Arte na Antiguidade e Renascimento',
+          'Vanguardas Europeias (Cubismo, Surrealismo, Futurismo)',
+          'Modernismo Brasileiro e Semana de 22',
+          'Arte Contemporânea, Instalações e Performance',
+          'Música, Teatro e Cinema Brasileiro',
+          'Patrimônio Cultural Material e Imaterial',
+        ],
       },
       {
         name: 'Física',
@@ -97,7 +139,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Cinemática Escalar e Vetorial',
+          'Leis de Newton, Atrito e Dinâmica',
+          'Trabalho, Energia e Conservação',
+          'Termologia, Calorimetria e Termodinâmica',
+          'Óptica Geométrica (Reflexão, Refração e Lentes)',
+          'Ondulatória e Acústica',
+          'Eletrostática e Eletrodinâmica (Circuitos)',
+          'Eletromagnetismo e Indução',
+        ],
       },
       {
         name: 'Química',
@@ -105,7 +156,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Estrutura Atômica e Tabela Periódica',
+          'Ligações Químicas e Polaridade',
+          'Funções Inorgânicas (Ácidos, Bases, Sais e Óxidos)',
+          'Estequiometria e Leis Ponderais',
+          'Soluções, Concentração e Diluição',
+          'Termoquímica e Cinética Química',
+          'Equilíbrio Químico, pH e Eletroquímica',
+          'Química Orgânica (Funções, Isomeria e Reações)',
+        ],
       },
       {
         name: 'Biologia',
@@ -113,7 +173,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Citologia: Organelas e Membrana Plasmática',
+          'Metabolismo Energético (Fotossíntese e Respiração)',
+          'Divisão Celular (Mitose e Meiose) e DNA',
+          'Genética Mendeliana e Biotecnologia',
+          'Ecologia, Ciclos Biogeoquímicos e Impactos Ambientais',
+          'Evolução e Origem da Vida',
+          'Fisiologia Humana (Digestório, Circulatório e Nervoso)',
+          'Microbiologia, Parasitologia e Imunologia',
+        ],
       },
       {
         name: 'História',
@@ -121,7 +190,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Antiguidade Clássica (Grécia e Roma)',
+          'Idade Média, Feudalismo e Expansão Marítima',
+          'Brasil Colônia (Economia Açucareira, Mineração e Revoltas)',
+          'Revolução Industrial e Revolução Francesa',
+          'Brasil Império (1º e 2º Reinado, Abolição)',
+          'República Velha e Era Vargas',
+          'Ditadura Militar e Redemocratização no Brasil',
+          'Guerras Mundiais e Guerra Fria',
+        ],
       },
       {
         name: 'Geografia',
@@ -129,7 +207,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Cartografia, Fusos Horários e Geotecnologias',
+          'Geomorfologia, Clima e Biomas Brasileiros',
+          'Hidrografia e Recursos Hídricos',
+          'Demografia e Urbanização Brasileira',
+          'Espaço Agrário e Questão Fundiária',
+          'Industrialização, Fontes de Energia e Transportes',
+          'Globalização e Blocos Econômicos',
+          'Geopolítica Contemporânea e Conflitos',
+        ],
       },
       {
         name: 'Filosofia',
@@ -137,7 +224,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Filosofia Antiga: Pré-Socráticos, Sócrates, Platão e Aristóteles',
+          'Filosofia Medieval (Patrística e Escolástica)',
+          'Racionalismo (Descartes) e Empirismo (Locke e Hume)',
+          'Iluminismo e Contratualismo (Hobbes, Locke, Rousseau)',
+          'Ética Kantiana e Imperativo Categórico',
+          'Filosofia Contemporânea (Nietzsche, Sartre, Foucault, Habermas)',
+        ],
       },
       {
         name: 'Sociologia',
@@ -145,7 +239,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Clássicos: Durkheim, Max Weber e Karl Marx',
+          'Cultura, Indústria Cultural e Escola de Frankfurt',
+          'Estratificação, Desigualdade Social e Trabalho',
+          'Cidadania, Direitos Humanos e Movimentos Sociais',
+          'Estado, Poder, Democracia e Participação Política',
+          'Questões Étnico-Raciais, Gênero e Violência Urbana',
+        ],
       },
     ],
     modules: [
@@ -160,7 +261,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Estratégias de Leitura (Skimming e Scanning)',
+              'Cognatos, Falsos Cognatos e Conectivos',
+              'Tempos Verbais e Voz Passiva na Leitura',
+              'Interpretação de Charges, Tirinhas e Infográficos',
+              'Leitura de Artigos Científicos e Reportagens',
+              'Vocabulário Contextual e Referência Pronominal',
+            ],
           },
         ],
       },
@@ -175,7 +283,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Falsos Amigos (Heterossemânticos) Mais Cobrados',
+              'Interpretação Textual e Inferência de Sentido',
+              'Conectivos e Marcadores Discursivos',
+              'Tempos Verbais no Contexto Jornalístico',
+              'Cultura Hispânica, Crônicas e Cartuns',
+              'Pronomes, Preposições e Expressões Idiomáticas',
+            ],
           },
         ],
       },
@@ -190,7 +305,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'avancado',
-            topics: [],
+            topics: [
+              'Corpo, Saúde e Qualidade de Vida',
+              'Esportes, Práticas Corporais e Lazer',
+              'Padrões Estéticos e Mídia Contemporânea',
+              'Tecnologias da Informação e Inclusão Digital',
+              'Redes Sociais, Fake News e Cultura Digital',
+            ],
           },
         ],
       },
@@ -205,7 +326,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Inteligência Artificial, Ética Digital e Trabalho',
+              'Crise Climática, Transição Energética e Amazônia',
+              'Envelhecimento Populacional e Previdência',
+              'Saúde Mental e Desafios na Educação Brasileira',
+              'Desigualdade Socioeconômica e Segurança Alimentar',
+              'Geopolítica Atual e Organismos Multilaterais',
+            ],
           },
         ],
       },
@@ -229,7 +357,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Bioquímica Celular e Enzimas',
+          'Citologia, Transporte em Membrana e Bioenergética',
+          'Biologia Molecular: Transcrição, Tradução e Biotecnologia',
+          'Genética Clássica, Linkage e Herança Sexual',
+          'Fisiologia Humana Completa (Endócrino, Renal, Imune)',
+          'Parasitologia Médica e Doenças Virais/Bacterianas',
+          'Botânica e Fisiologia Vegetal',
+          'Ecologia Populacional e Relações Ecológicas',
+        ],
       },
       {
         name: 'Química (Foco Med)',
@@ -237,7 +374,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Estequiometria Avançada e Pureza/Rendimento',
+          'Soluções, Titulação e Propriedades Coligativas',
+          'Termoquímica, Entalpia e Lei de Hess',
+          'Cinética Química e Equilíbrio Químico (Kc/Kp)',
+          'Equilíbrio Iônico, pH, pOH e Tampão',
+          'Eletroquímica (Pilhas, Eletrólise e Corrosão)',
+          'Química Orgânica: Isomeria Espacial e Reações',
+          'Bioquímica: Polímeros, Carboidratos e Proteínas',
+        ],
       },
       {
         name: 'Física',
@@ -245,7 +391,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Cinemática Escalar e Vetorial',
+          'Leis de Newton, Atrito e Dinâmica',
+          'Trabalho, Energia e Conservação',
+          'Termologia, Calorimetria e Termodinâmica',
+          'Óptica Geométrica (Reflexão, Refração e Lentes)',
+          'Ondulatória e Acústica',
+          'Eletrostática e Eletrodinâmica (Circuitos)',
+          'Eletromagnetismo e Indução',
+        ],
       },
       {
         name: 'Matemática',
@@ -253,7 +408,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Razão, Proporção e Porcentagem',
+          'Funções do 1º e 2º Grau',
+          'Função Exponencial e Logarítmica',
+          'Geometria Plana (Áreas e Triângulos)',
+          'Geometria Espacial (Prismas, Cilindros e Esferas)',
+          'Trigonometria Básica e Ciclo Trigonométrico',
+          'Análise Combinatória e Probabilidade',
+          'Estatística (Média, Mediana, Moda e Gráficos)',
+        ],
       },
       {
         name: 'Redação Nota 1000',
@@ -261,7 +425,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Estrutura Dissertativa e Projeto de Texto',
+          'Repertório Sociocultural Produtivo',
+          'Coesão Interparágrafos e Conectivos',
+          'Argumentação por Evidência e Exemplificação',
+          'Proposta de Intervenção (5 Elementos Obrigatórios)',
+          'Temas de Saúde Pública, Bioética e Tecnologia',
+        ],
       },
       {
         name: 'Português & Interpretação',
@@ -269,7 +440,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Interpretação de Textos Complexos e Inferência',
+          'Figuras de Linguagem e Recursos Expressivos',
+          'Coesão Referencial, Sequencial e Conectivos',
+          'Variação Linguística e Norma Padrão',
+          'Sintaxe, Concordância e Regência Aplicadas',
+          'Intertextualidade e Ironia',
+        ],
       },
       {
         name: 'Literatura',
@@ -277,7 +455,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Quinhentismo, Barroco e Arcadismo',
+          'Romantismo (Poesia e Prosa)',
+          'Realismo, Naturalismo e Machado de Assis',
+          'Parnasianismo e Simbolismo',
+          'Pré-Modernismo Brasileiro',
+          'Modernismo (1ª, 2ª e 3ª Gerações)',
+          'Literatura Contemporânea e Poesia Social',
+        ],
       },
       {
         name: 'História',
@@ -285,7 +471,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Antiguidade Clássica (Grécia e Roma)',
+          'Idade Média, Feudalismo e Expansão Marítima',
+          'Brasil Colônia (Economia Açucareira, Mineração e Revoltas)',
+          'Revolução Industrial e Revolução Francesa',
+          'Brasil Império (1º e 2º Reinado, Abolição)',
+          'República Velha e Era Vargas',
+          'Ditadura Militar e Redemocratização no Brasil',
+          'Guerras Mundiais e Guerra Fria',
+        ],
       },
       {
         name: 'Geografia',
@@ -293,7 +488,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Cartografia, Fusos Horários e Geotecnologias',
+          'Geomorfologia, Clima e Biomas Brasileiros',
+          'Hidrografia e Recursos Hídricos',
+          'Demografia e Urbanização Brasileira',
+          'Espaço Agrário e Questão Fundiária',
+          'Industrialização, Fontes de Energia e Transportes',
+          'Globalização e Blocos Econômicos',
+          'Geopolítica Contemporânea e Conflitos',
+        ],
       },
       {
         name: 'Filosofia',
@@ -301,7 +505,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 2,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Filosofia Antiga: Pré-Socráticos, Sócrates, Platão e Aristóteles',
+          'Filosofia Medieval (Patrística e Escolástica)',
+          'Racionalismo (Descartes) e Empirismo (Locke e Hume)',
+          'Iluminismo e Contratualismo (Hobbes, Locke, Rousseau)',
+          'Ética Kantiana e Imperativo Categórico',
+          'Filosofia Contemporânea (Nietzsche, Sartre, Foucault, Habermas)',
+        ],
       },
       {
         name: 'Sociologia',
@@ -309,7 +520,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 2,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Clássicos: Durkheim, Max Weber e Karl Marx',
+          'Cultura, Indústria Cultural e Escola de Frankfurt',
+          'Estratificação, Desigualdade Social e Trabalho',
+          'Cidadania, Direitos Humanos e Movimentos Sociais',
+          'Estado, Poder, Democracia e Participação Política',
+          'Questões Étnico-Raciais, Gênero e Violência Urbana',
+        ],
       },
       {
         name: 'Artes',
@@ -317,7 +535,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 2,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Arte na Antiguidade e Renascimento',
+          'Vanguardas Europeias (Cubismo, Surrealismo, Futurismo)',
+          'Modernismo Brasileiro e Semana de 22',
+          'Arte Contemporânea, Instalações e Performance',
+          'Música, Teatro e Cinema Brasileiro',
+          'Patrimônio Cultural Material e Imaterial',
+        ],
       },
     ],
     modules: [
@@ -332,7 +557,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Estratégias de Leitura (Skimming e Scanning)',
+              'Cognatos, Falsos Cognatos e Conectivos',
+              'Tempos Verbais e Voz Passiva na Leitura',
+              'Interpretação de Charges, Tirinhas e Infográficos',
+              'Leitura de Artigos Científicos e Reportagens',
+              'Vocabulário Contextual e Referência Pronominal',
+            ],
           },
         ],
       },
@@ -347,7 +579,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Falsos Amigos (Heterossemânticos) Mais Cobrados',
+              'Interpretação Textual e Inferência de Sentido',
+              'Conectivos e Marcadores Discursivos',
+              'Tempos Verbais no Contexto Jornalístico',
+              'Cultura Hispânica, Crônicas e Cartuns',
+              'Pronomes, Preposições e Expressões Idiomáticas',
+            ],
           },
         ],
       },
@@ -362,7 +601,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Biologia Discursiva: Fisiologia e Genética',
+              'Química Discursiva: Cálculos Estequiométricos e Equilíbrio',
+              'Física Discursiva: Mecânica, Gráficos e Circuitos',
+              'Estruturação de Resposta Objetiva e Unidades de Medida',
+              'Interpretação de Experimentos Científicos',
+            ],
           },
           {
             name: 'Obras Literárias Obrigatórias',
@@ -370,7 +615,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'media',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Análise de Enredo, Narrador e Tempo',
+              'Personagens Centrais e Conflitos Psicológicos',
+              'Contexto Histórico-Social de Cada Obra',
+              'Estilo de Época e Recursos de Linguagem',
+              'Comparação Temática Entre as Obras da Lista',
+            ],
           },
         ],
       },
@@ -385,7 +636,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Princípios e Diretrizes do SUS (Universalidade, Equidade)',
+              'Epidemiologia, Vacinação e Doenças Emergentes',
+              'Bioética: Eutanásia, Pesquisa Clínica e Sigilo Médico',
+              'Atenção Primária e Saúde Coletiva no Brasil',
+              'Impactos da Tecnologia e Telemedicina no Atendimento',
+            ],
           },
         ],
       },
@@ -409,7 +666,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Interpretação e Compreensão Textual',
+          'Gêneros e Tipos Textuais',
+          'Morfologia e Classes de Palavras',
+          'Sintaxe do Período Simples e Composto',
+          'Concordância Verbal e Nominal',
+          'Regência Verbal, Nominal e Crase',
+          'Pontuação e Semântica (Coesão e Coerência)',
+          'Variação Linguística e Funções da Linguagem',
+        ],
       },
       {
         name: 'Direito Constitucional',
@@ -417,7 +683,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Princípios Fundamentais (Art. 1º ao 4º da CF)',
+          'Direitos e Garantias Fundamentais (Art. 5º)',
+          'Direitos Sociais, Nacionalidade e Direitos Políticos',
+          'Organização do Estado e Repartição de Competências',
+          'Poder Legislativo e Processo Legislativo',
+          'Poder Executivo e Poder Judiciário',
+          'Controle de Constitucionalidade',
+          'Administração Pública na CF (Art. 37 ao 41)',
+        ],
       },
       {
         name: 'Direito Administrativo',
@@ -425,7 +700,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Princípios da Administração Pública (LIMPE e Implícitos)',
+          'Organização Administrativa (Direta, Indireta e Agências)',
+          'Poderes Administrativos e Abuso de Poder',
+          'Atos Administrativos (Requisitos, Atributos e Extinção)',
+          'Licitações e Contratos (Lei 14.133/2021)',
+          'Agentes Públicos e Responsabilidade Civil do Estado',
+          'Improbidade Administrativa (Lei 8.429/92 atualizada)',
+          'Controle da Administração e Processo Administrativo',
+        ],
       },
       {
         name: 'Raciocínio Lógico',
@@ -433,7 +717,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Proposições Lógicas e Conectivos (Tabela-Verdade)',
+          'Equivalências Lógicas e Leis de De Morgan',
+          'Negação de Proposições Compostas e Quantificadores',
+          'Argumentação Lógica e Dedução',
+          'Diagramas Lógicos (Silogismos e Conjuntos)',
+          'Análise Combinatória e Probabilidade Básica',
+          'Verdades, Mentiras e Associação Lógica',
+        ],
       },
       {
         name: 'Matemática',
@@ -441,7 +733,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'media',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Razão, Proporção e Porcentagem',
+          'Funções do 1º e 2º Grau',
+          'Função Exponencial e Logarítmica',
+          'Geometria Plana (Áreas e Triângulos)',
+          'Geometria Espacial (Prismas, Cilindros e Esferas)',
+          'Trigonometria Básica e Ciclo Trigonométrico',
+          'Análise Combinatória e Probabilidade',
+          'Estatística (Média, Mediana, Moda e Gráficos)',
+        ],
       },
       {
         name: 'Informática para Concursos',
@@ -449,7 +750,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Sistemas Operacionais (Windows 10/11 e Linux)',
+          'Pacote Office e LibreOffice (Word/Writer, Excel/Calc)',
+          'Redes de Computadores, Protocolos e Navegadores',
+          'Segurança da Informação (Malware, Phishing, Criptografia)',
+          'Computação em Nuvem, Backup e Ferramentas Colaborativas',
+          'Correio Eletrônico e Certificação Digital',
+        ],
       },
       {
         name: 'Ética no Serviço Público',
@@ -457,7 +765,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 2,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Código de Ética Profissional (Decreto 1.171/1994)',
+          'Deveres e Vedações do Servidor Público',
+          'Comissão de Ética e Processo Ético',
+          'Decreto 6.029/2007 (Sistema de Gestão da Ética)',
+          'Lei de Conflito de Interesses (Lei 12.813/2013)',
+        ],
       },
       {
         name: 'Atualidades & Redação Oficial',
@@ -465,7 +779,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Manual de Redação da Presidência (Padrão Ofício)',
+          'Atributos da Redação Oficial (Impessoalidade, Clareza, Concisão)',
+          'Pronomes de Tratamento e Vocativos',
+          'Temas Políticos, Econômicos e Sociais Nacionais',
+          'Relações Internacionais e Geopolítica Atual',
+          'Sustentabilidade, Ciência e Tecnologia no Brasil',
+        ],
       },
     ],
     modules: [
@@ -480,7 +801,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Fundamentos, Competências do DF e Regiões Administrativas',
+              'Organização dos Poderes no DF (CLDF e Governador)',
+              'Servidores Públicos do Distrito Federal na LODF',
+              'Ordem Social, Educação, Saúde e Segurança Pública no DF',
+              'Ordem Econômica, Financeira e Tributária do DF',
+            ],
           },
           {
             name: 'Regime Jurídico (LC 840/2011)',
@@ -488,7 +815,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Provimento, Nomeação, Posse, Exercício e Estágio Probatório',
+              'Vacância, Remoção, Redistribuição e Substituição',
+              'Direitos, Vantagens, Férias, Licenças e Afastamentos',
+              'Regime Disciplinar: Deveres, Proibições e Acumulação',
+              'Infrações, Sanções Disciplinares e Prescrição',
+              'Sindicância e Processo Administrativo Disciplinar (PAD)',
+            ],
           },
           {
             name: 'Conhecimentos sobre o DF (RIDE)',
@@ -496,7 +830,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Formação Histórica de Brasília e Plano Piloto',
+              'Geografia, Clima (Cerrado) e Bacias Hidrográficas do DF',
+              'Estrutura da Região Integrada de Desenvolvimento (RIDE-DF)',
+              'Aspectos Socioeconômicos, Demografia e Urbanização do DF',
+              'Atualidades Políticas e Culturais do Distrito Federal',
+            ],
           },
         ],
       },
@@ -511,7 +851,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Disposições Preliminares, Provimento e Vacância',
+              'Remoção, Redistribuição e Substituição',
+              'Vencimento, Remuneração, Vantagens e Indenizações',
+              'Férias, Licenças, Afastamentos e Concessões',
+              'Regime Disciplinar (Deveres, Proibições e Penalidades)',
+              'Sindicância e Processo Administrativo Disciplinar',
+            ],
           },
           {
             name: 'Administração Pública & Políticas Públicas',
@@ -519,7 +866,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Modelos de Administração (Patrimonialista, Burocrática, Gerencial)',
+              'Governança, Governabilidade e Accountability',
+              'Ciclo de Políticas Públicas (Formação, Implementação, Avaliação)',
+              'Planejamento Estratégico, PPA, LDO e LOA',
+              'Gestão de Pessoas, Liderança e Desempenho no Setor Público',
+            ],
           },
         ],
       },
@@ -534,7 +887,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'LINDB e Parte Geral: Pessoas Naturais e Jurídicas',
+              'Fatos, Atos e Negócios Jurídicos (Validade e Defeitos)',
+              'Prescrição e Decadência',
+              'Direito das Obrigações e Modalidades',
+              'Contratos em Espécie e Teoria Geral dos Contratos',
+              'Responsabilidade Civil',
+              'Direito das Coisas (Posse, Propriedade e Direitos Reais)',
+              'Direito de Família e Sucessões',
+            ],
           },
           {
             name: 'Direito Processual Civil',
@@ -542,7 +904,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Normas Fundamentais, Jurisdição e Competência',
+              'Sujeitos do Processo, Litisconsórcio e Intervenção de Terceiros',
+              'Atos Processuais, Prazos e Tutelas Provisórias',
+              'Procedimento Comum: Petição Inicial, Contestação e Provas',
+              'Sentença, Coisa Julgada e Cumprimento de Sentença',
+              'Execução e Procedimentos Especiais',
+              'Recursos no CPC (Apelação, Agravo, REsp e RE)',
+            ],
           },
           {
             name: 'Direito Penal',
@@ -550,7 +920,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Princípios Penais e Aplicação da Lei Penal',
+              'Teoria do Crime: Fato Típico, Ilicitude e Culpabilidade',
+              'Tentativa, Desistência Voluntária e Erro de Tipo/Proibição',
+              'Concurso de Pessoas e Concurso de Crimes',
+              'Teoria da Pena, Dosimetria e Extinção da Punibilidade',
+              'Crimes contra a Pessoa e contra o Patrimônio',
+              'Crimes contra a Administração Pública',
+            ],
           },
           {
             name: 'Direito Processual Penal',
@@ -558,7 +936,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Princípios e Sistemas Processuais Penais',
+              'Inquérito Policial e Ação Penal',
+              'Competência e Questões Incidentes',
+              'Provas no Processo Penal e Nulidades',
+              'Prisão em Flagrante, Preventiva, Temporária e Liberdade Provisória',
+              'Procedimentos Comum, Sumário e Tribunal do Júri',
+              'Recursos em Processo Penal e Habeas Corpus',
+            ],
           },
           {
             name: 'Direito Eleitoral',
@@ -566,7 +952,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Organização da Justiça Eleitoral e Competência',
+              'Alistamento Eleitoral, Domicílio e Direitos Políticos',
+              'Elegibilidade e Inelegibilidades (LC 64/90)',
+              'Partidos Políticos, Coligações e Federações',
+              'Registro de Candidatura, Propaganda Eleitoral e Financiamento',
+              'Ações Eleitorais e Crimes Eleitorais',
+            ],
           },
         ],
       },
@@ -581,7 +974,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 5,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Sistema Tributário Nacional e Princípios Constitucionais',
+              'Imunidades Tributárias e Competência Tributária',
+              'Espécies Tributárias (Impostos, Taxas, Contribuições)',
+              'Obrigação Tributária, Fato Gerador e Responsabilidade',
+              'Crédito Tributário: Lançamento, Suspensão, Extinção e Exclusão',
+              'Garantias, Privilégios e Administração Tributária',
+              'Impostos em Espécie (ICMS, ISS, IR, IPI, IPTU, ITCMD)',
+            ],
           },
           {
             name: 'Contabilidade Geral & Avançada',
@@ -589,7 +990,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 5,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Patrimônio, Equação Fundamental e Contas Contábeis',
+              'Escrituração, Método das Partidas Dobradas e Razonetes',
+              'Balanço Patrimonial (CPC 26) e Classificação',
+              'Demonstração do Resultado do Exercício (DRE)',
+              'DFC (Fluxo de Caixa) e DVA',
+              'Operações com Mercadorias, Estoques e Tributos',
+              'Depreciação, Amortização, Provisões e CPCs Essenciais',
+            ],
           },
           {
             name: 'AFO & Direito Financeiro',
@@ -597,7 +1006,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Orçamento Público: Conceito e Princípios Orçamentários',
+              'Ciclo Orçamentário e Instrumentos (PPA, LDO, LOA)',
+              'Créditos Adicionais (Suplementares, Especiais e Extraordinários)',
+              'Receita Pública: Classificação e Estágios',
+              'Despesa Pública: Classificação e Estágios (Empenho, Liquidação, Pagamento)',
+              'Lei de Responsabilidade Fiscal (LC 101/2000)',
+            ],
           },
           {
             name: 'Auditoria Governamental e Privada',
@@ -605,7 +1021,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Conceito, Objetivos e Normas de Auditoria (NBC TA)',
+              'Independência, Ceticismo Profissional e Risco de Auditoria',
+              'Planejamento, Materialidade e Amostragem Estatística',
+              'Evidência de Auditoria e Testes Substantivos/de Controle',
+              'Relatório do Auditor Independente (Tipos de Opinião)',
+              'Auditoria Governamental (NBASP / Controle Interno e Externo)',
+            ],
           },
         ],
       },
@@ -620,7 +1043,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 5,
             difficulty: 'media',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Lei de Drogas (Lei 11.343/2006)',
+              'Estatuto do Desarmamento (Lei 10.826/2003)',
+              'Lei de Crimes Hediondos (Lei 8.072/1990)',
+              'Organizações Criminosas (Lei 12.850/2013)',
+              'Abuso de Autoridade (Lei 13.869/2019)',
+              'Lei Maria da Penha (Lei 11.340/2006) e Tortura',
+              'Interceptação Telefônica e Lavagem de Capitais',
+            ],
           },
           {
             name: 'Medicina Legal & Criminalística',
@@ -628,7 +1059,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Tanatologia Forense e Cronotanatognose',
+              'Traumatologia Forense (Lesões Contusas, Cortantes e Perfurocontusas)',
+              'Asfixiologia Forense',
+              'Sexologia Forense e Imputabilidade Penal',
+              'Toxicologia e Cadeia de Custódia de Vestígios',
+            ],
           },
           {
             name: 'Contabilidade para Polícia',
@@ -636,7 +1073,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Equação Patrimonial e Balanço Patrimonial',
+              'Contas Patrimoniais vs Contas de Resultado (DRE)',
+              'Regime de Competência vs Regime de Caixa',
+              'Fluxo de Caixa, Conciliação e Indícios de Fraude',
+              'Análise de Demonstrações Contábeis Básica',
+            ],
           },
           {
             name: 'Estatística',
@@ -644,7 +1087,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Estatística Descritiva: Média, Mediana, Moda e Quartis',
+              'Medidas de Dispersão (Variância e Desvio Padrão)',
+              'Probabilidade Condicional e Teorema de Bayes',
+              'Variáveis Aleatórias e Distribuições (Binomial, Normal, Poisson)',
+              'Amostragem, Estimação e Intervalo de Confiança',
+              'Testes de Hipóteses e Regressão Linear',
+            ],
           },
           {
             name: 'Legislação de Trânsito (CTB)',
@@ -652,7 +1102,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Sistema Nacional de Trânsito e Competências',
+              'Normas Gerais de Circulação e Conduta',
+              'Sinalização de Trânsito e Engenharia de Tráfego',
+              'Habilitação (CNH, Categorias e Pontuação)',
+              'Infrações, Penalidades e Medidas Administrativas',
+              'Crimes de Trânsito e Resoluções do CONTRAN',
+            ],
           },
         ],
       },
@@ -667,7 +1124,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 5,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Sistema Financeiro Nacional (CMN, BACEN e CVM)',
+              'Bancos Comerciais, Múltiplos, Caixas e Cooperativas',
+              'Mercado Monetário, de Crédito, de Capitais e Cambial',
+              'Produtos Bancários (CDB, LCI/LCA, Fundos, Seguros e Previdência)',
+              'Pix, Open Finance, Drex e Garantias do SFN (FGC)',
+              'Prevenção à Lavagem de Dinheiro (PLD/FT) e Compliance',
+            ],
           },
           {
             name: 'Matemática Financeira',
@@ -675,7 +1139,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Porcentagem, Juros Simples e Desconto Simples',
+              'Juros Compostos e Taxas Equivalentes/Efetivas',
+              'Séries de Pagamentos Uniformes (Valor Presente e Futuro)',
+              'Sistemas de Amortização: Tabela Price e SAC',
+              'Análise de Investimentos (VPL e TIR)',
+            ],
           },
           {
             name: 'Vendas & Negociação',
@@ -683,7 +1153,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Marketing de Serviços e Relacionamento (CRM)',
+              'Etapas da Venda Consultiva e Gatilhos de Decisão',
+              'Atendimento ao Cliente, Escuta Ativa e Pós-Venda',
+              'Gestão de Objeções e Técnicas de Fechamento',
+              'Código de Defesa do Consumidor Aplicado ao Setor Bancário',
+            ],
           },
           {
             name: 'Atualidades do Mercado Financeiro',
@@ -691,7 +1167,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Bancos Digitais, Fintechs e Competição Bancária',
+              'Sistema de Pagamentos Instantâneos (Pix) e Open Finance',
+              'Criptoativos, Tokenização e Moeda Digital (Drex)',
+              'Política Monetária (Selic, COPOM e Inflação)',
+              'Finanças Sustentáveis (ESG) e Segurança Cibernética',
+            ],
           },
         ],
       },
@@ -706,7 +1188,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 5,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Conceito, Princípios Constitucionais e Organização da Seguridade',
+              'Segurados Obrigatórios, Facultativos e Dependentes (RGPS)',
+              'Inscrição, Filiação e Manutenção da Qualidade de Segurado',
+              'Custeio da Seguridade Social e Salário de Contribuição',
+              'Aposentadorias, Auxílios, Salário-Maternidade e Pensão por Morte',
+              'Carência, Cálculo de Benefícios e BPC/LOAS',
+            ],
           },
         ],
       },
@@ -721,7 +1210,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 5,
             difficulty: 'media',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Princípios e Fins da Educação Nacional (LDB - Lei 9.394/96)',
+              'Organização da Educação Básica e Gestão Democrática',
+              'Modalidades: Educação Infantil, EJA, Especial e Profissional',
+              'Plano Nacional de Educação (PNE) e Financiamento (FUNDEB)',
+              'Diretrizes Curriculares Nacionais Gerais',
+            ],
           },
           {
             name: 'Didática, Currículo & BNCC',
@@ -729,7 +1224,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Tendências Pedagógicas Brasileiras',
+              'Planejamento Escolar, PPP e Plano de Aula',
+              'Avaliação da Aprendizagem (Diagnóstica, Formativa, Somativa)',
+              'Competências Gerais e Estrutura da BNCC',
+              'Teorias da Aprendizagem (Piaget, Vygotsky, Wallon, Ausubel)',
+            ],
           },
           {
             name: 'ECA (Estatuto da Criança e Adolescente)',
@@ -737,7 +1238,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Princípios da Proteção Integral e Direitos Fundamentais',
+              'Direito à Educação, Cultura, Esporte e Lazer',
+              'Direito à Profissionalização e Proteção no Trabalho',
+              'Medidas de Proteção e Medidas Socioeducativas',
+              'Conselho Tutelar e Atos Infracionais',
+            ],
           },
         ],
       },
@@ -774,7 +1281,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Atividade da Advocacia, Atos Privativos e Incompatibilidades',
+          'Direitos e Prerrogativas dos Advogados (Art. 6º e 7º)',
+          'Inscrição na OAB, Sociedade de Advogados e Advogado Empregado',
+          'Honorários Advocatícios (Convencionados, Arbitrados e Sucumbência)',
+          'Infrações e Sanções Disciplinares',
+          'Código de Ética: Publicidade, Sigilo Profissional e Órgãos da OAB',
+        ],
       },
       {
         name: 'Direito Constitucional',
@@ -782,7 +1296,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Princípios Fundamentais (Art. 1º ao 4º da CF)',
+          'Direitos e Garantias Fundamentais (Art. 5º)',
+          'Direitos Sociais, Nacionalidade e Direitos Políticos',
+          'Organização do Estado e Repartição de Competências',
+          'Poder Legislativo e Processo Legislativo',
+          'Poder Executivo e Poder Judiciário',
+          'Controle de Constitucionalidade',
+          'Administração Pública na CF (Art. 37 ao 41)',
+        ],
       },
       {
         name: 'Direito Administrativo',
@@ -790,7 +1313,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Princípios da Administração Pública (LIMPE e Implícitos)',
+          'Organização Administrativa (Direta, Indireta e Agências)',
+          'Poderes Administrativos e Abuso de Poder',
+          'Atos Administrativos (Requisitos, Atributos e Extinção)',
+          'Licitações e Contratos (Lei 14.133/2021)',
+          'Agentes Públicos e Responsabilidade Civil do Estado',
+          'Improbidade Administrativa (Lei 8.429/92 atualizada)',
+          'Controle da Administração e Processo Administrativo',
+        ],
       },
       {
         name: 'Direito Civil',
@@ -798,7 +1330,16 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'LINDB e Parte Geral: Pessoas Naturais e Jurídicas',
+          'Fatos, Atos e Negócios Jurídicos (Validade e Defeitos)',
+          'Prescrição e Decadência',
+          'Direito das Obrigações e Modalidades',
+          'Contratos em Espécie e Teoria Geral dos Contratos',
+          'Responsabilidade Civil',
+          'Direito das Coisas (Posse, Propriedade e Direitos Reais)',
+          'Direito de Família e Sucessões',
+        ],
       },
       {
         name: 'Processo Civil',
@@ -806,7 +1347,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Normas Fundamentais, Jurisdição e Competência',
+          'Litisconsórcio, Intervenção de Terceiros e Tutelas Provisórias',
+          'Procedimento Comum, Resposta do Réu e Audiências',
+          'Provas, Sentença e Coisa Julgada',
+          'Cumprimento de Sentença e Processo de Execução',
+          'Teoria Geral dos Recursos, Apelação e Agravos',
+          'Recursos aos Tribunais Superiores',
+        ],
       },
       {
         name: 'Direito Penal',
@@ -814,7 +1363,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Princípios Penais e Aplicação da Lei Penal',
+          'Teoria do Crime: Fato Típico, Ilicitude e Culpabilidade',
+          'Tentativa, Desistência Voluntária e Erro de Tipo/Proibição',
+          'Concurso de Pessoas e Concurso de Crimes',
+          'Teoria da Pena, Dosimetria e Extinção da Punibilidade',
+          'Crimes contra a Pessoa e contra o Patrimônio',
+          'Crimes contra a Administração Pública',
+        ],
       },
       {
         name: 'Processo Penal',
@@ -822,7 +1379,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Princípios, Inquérito Policial e Ação Penal',
+          'Competência, Provas e Cadeia de Custódia',
+          'Prisões Cautelares e Medidas Alternativas',
+          'Procedimento Comum, Júri e Nulidades',
+          'Sentença Penal e Recursos (Apelação, RESE, Embargos)',
+          'Execução Penal e Ações Autônomas de Impugnação',
+        ],
       },
       {
         name: 'Direito do Trabalho',
@@ -830,7 +1394,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Princípios, Fontes e Relação de Emprego vs Relação de Trabalho',
+          'Contrato Individual de Trabalho e Alteração Contratual',
+          'Duração do Trabalho, Horas Extras, Intervalos e Férias',
+          'Remuneração, Salário, Adicionais e Equiparação Salarial',
+          'Suspensão e Interrupção do Contrato de Trabalho',
+          'Extinção do Contrato, Verbas Rescisórias e Estabilidades',
+          'Direito Coletivo, Sindicatos e Negociação Coletiva',
+        ],
       },
       {
         name: 'Processo do Trabalho',
@@ -838,7 +1410,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Organização e Competência da Justiça do Trabalho',
+          'Atos, Prazos e Custas Processuais Trabalhistas',
+          'Ritos: Ordinário, Sumaríssimo e Inquérito Judicial',
+          'Audiência Trabalhista, Resposta do Réu e Provas',
+          'Sentença e Recursos Trabalhistas (RO, RR, Agravos)',
+          'Liquidação e Execução Trabalhista',
+        ],
       },
       {
         name: 'Direito Tributário',
@@ -846,7 +1425,15 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Sistema Tributário Nacional e Princípios Constitucionais',
+          'Imunidades Tributárias e Competência Tributária',
+          'Espécies Tributárias (Impostos, Taxas, Contribuições)',
+          'Obrigação Tributária, Fato Gerador e Responsabilidade',
+          'Crédito Tributário: Lançamento, Suspensão, Extinção e Exclusão',
+          'Garantias, Privilégios e Administração Tributária',
+          'Impostos em Espécie (ICMS, ISS, IR, IPI, IPTU, ITCMD)',
+        ],
       },
       {
         name: 'Direito Empresarial',
@@ -854,7 +1441,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Teoria da Empresa, Empresário Individual e MEI',
+          'Sociedades Limitadas (LTDA) e Sociedades Anônimas (S/A)',
+          'Títulos de Crédito (Letra de Câmbio, Nota Promissória, Cheque, Duplicata)',
+          'Falência e Recuperação Judicial e Extrajudicial',
+          'Contratos Empresariais e Propriedade Industrial',
+        ],
       },
     ],
     modules: [
@@ -869,7 +1462,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Teoria Geral, Características e Gerações dos Direitos Humanos',
+              'Sistema Global (ONU): DUDH, Pactos de 1966',
+              'Sistema Interamericano: Pacto de San José e Corte IDH',
+              'Incorporação dos Tratados Internacionais no Brasil (EC 45/2004)',
+              'Grupos Vulneráveis e Políticas Internacionais de Proteção',
+            ],
           },
           {
             name: 'Direito Internacional',
@@ -877,7 +1476,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Fontes do Direito Internacional Público e Tratados',
+              'Nacionalidade, Condição Jurídica do Estrangeiro e Extradição',
+              'Imunidade de Jurisdição e Execução dos Estados',
+              'Direito Internacional Privado: Regras de Conexão na LINDB',
+              'Homologação de Sentença Estrangeira e Cooperação Jurídica',
+            ],
           },
           {
             name: 'Filosofia do Direito',
@@ -885,7 +1490,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Jusnaturalismo Antigo, Medieval e Racionalista',
+              'Positivismo Jurídico: Hans Kelsen e Herbert Hart',
+              'Pós-Positivismo e Neoconstitucionalismo (Dworkin e Alexy)',
+              'Teorias da Justiça (John Rawls e Aristóteles)',
+              'Hermenêutica Jurídica e Argumentação',
+            ],
           },
         ],
       },
@@ -900,7 +1511,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Conceitos de Consumidor, Fornecedor, Produto e Serviço',
+              'Direitos Básicos e Inversão do Ônus da Prova',
+              'Responsabilidade pelo Fato e pelo Vício do Produto/Serviço',
+              'Práticas Comerciais Abusivas, Cobrança e Publicidade',
+              'Proteção Contratual, Cláusulas Abusivas e Direito de Arrependimento',
+            ],
           },
           {
             name: 'Estatuto da Criança e do Adolescente (ECA)',
@@ -908,7 +1525,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 3,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Proteção Integral, Direitos Fundamentais e Convivência Familiar',
+              'Guarda, Tutela, Adoção e Destituição do Poder Familiar',
+              'Autorização para Viagem e Prevenção',
+              'Ato Infracional e Medidas Socioeducativas',
+              'Conselho Tutelar e Infrações Administrativas/Crimes',
+            ],
           },
           {
             name: 'Direito Ambiental',
@@ -916,7 +1539,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'baixa',
             knowledgeLevel: 'intermediario',
-            topics: [],
+            topics: [
+              'Princípios Ambientais (Poluidor-Pagador, Precaução, Prevenção)',
+              'Competências Constitucionais Ambientais',
+              'Política Nacional do Meio Ambiente e Licenciamento (EIA/RIMA)',
+              'SNUC (Unidades de Conservação) e Código Florestal (APP e RL)',
+              'Responsabilidade Civil, Administrativa e Penal Ambiental',
+            ],
           },
         ],
       },
@@ -931,7 +1560,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Organização da Justiça Eleitoral e Competência',
+              'Alistamento Eleitoral, Domicílio e Direitos Políticos',
+              'Elegibilidade e Inelegibilidades (LC 64/90)',
+              'Partidos Políticos, Coligações e Federações',
+              'Registro de Candidatura, Propaganda Eleitoral e Financiamento',
+              'Ações Eleitorais e Crimes Eleitorais',
+            ],
           },
           {
             name: 'Direito Previdenciário',
@@ -939,7 +1575,12 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Princípios da Seguridade Social na Constituição',
+              'Segurados, Dependentes e Manutenção da Qualidade',
+              'Benefícios do RGPS (Aposentadorias, Auxílios e Pensão)',
+              'Custeio Previdenciário e Regimes Próprios (RPPS)',
+            ],
           },
           {
             name: 'Direito Financeiro',
@@ -947,7 +1588,12 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 2,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Princípios Orçamentários e Ciclo Orçamentário (PPA, LDO, LOA)',
+              'Receitas, Despesas Públicas e Empenho',
+              'Créditos Adicionais e Precatórios',
+              'Lei de Responsabilidade Fiscal e Controle Financeiro',
+            ],
           },
         ],
       },
@@ -971,7 +1617,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'media',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Variáveis, Tipos de Dados e Operadores',
+          'Estruturas Condicionais (if/else, switch)',
+          'Laços de Repetição (for, while, do-while)',
+          'Funções, Escopo e Recursividade',
+          'Arrays, Matrizes e Manipulação de Strings',
+          'Programação Orientada a Objetos (Classes, Herança, Polimorfismo)',
+        ],
       },
       {
         name: 'Estrutura de Dados & Algoritmos',
@@ -979,7 +1632,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'alta',
         knowledgeLevel: 'iniciante',
-        topics: [],
+        topics: [
+          'Complexidade Assintótica (Notação Big-O)',
+          'Listas Encadeadas, Pilhas e Filas',
+          'Tabelas Hash (HashMap) e Conjuntos',
+          'Árvores Binárias, BST e Heaps',
+          'Algoritmos de Ordenação e Busca Binária',
+          'Grafos (BFS, DFS e Menor Caminho) e Programação Dinâmica',
+        ],
       },
       {
         name: 'Banco de Dados & SQL',
@@ -987,7 +1647,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Modelagem Relacional (DER, Chaves Primária e Estrangeira)',
+          'Normalização (1FN, 2FN, 3FN)',
+          'Consultas SQL: SELECT, WHERE, ORDER BY e Agregações',
+          'JOINs (INNER, LEFT, RIGHT) e Subqueries',
+          'Índices, Transações (ACID) e Otimização de Queries',
+          'NoSQL: Conceitos de Documentos, Chave-Valor e Cache (Redis)',
+        ],
       },
       {
         name: 'Backend & APIs',
@@ -995,7 +1662,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 5,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Protocolo HTTP, Métodos, Status Codes e Headers',
+          'Arquitetura REST, Versionamento e Boas Práticas',
+          'Autenticação e Autorização (JWT, OAuth 2.0, Sessões)',
+          'Validação de Dados, Tratamento de Erros e Logging',
+          'Arquitetura em Camadas, Clean Architecture e Padrões',
+          'Mensageria, Filas Assíncronas e WebSockets',
+        ],
       },
       {
         name: 'Frontend & Web Moderna',
@@ -1003,7 +1677,14 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'HTML5 Semântico e Acessibilidade (WCAG / ARIA)',
+          'CSS Moderno: Flexbox, Grid e Design Responsivo',
+          'JavaScript Moderno (ES6+, Promises, Async/Await, DOM)',
+          'TypeScript: Tipagem Estática, Generics e Interfaces',
+          'React: Componentes, Hooks, Estado e Ciclo de Vida',
+          'Gerenciamento de Estado, Roteamento e Performance Web',
+        ],
       },
       {
         name: 'Engenharia de Software & Testes (QA)',
@@ -1011,7 +1692,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 4,
         difficulty: 'media',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Metodologias Ágeis (Scrum, Kanban) e Estimativas',
+          'Princípios SOLID, Clean Code e Refatoração',
+          'Pirâmide de Testes: Unitários, Integração e E2E',
+          'TDD, Mocks, Stubs e Cobertura de Código',
+          'Code Review, Documentação Técnica e Observabilidade',
+        ],
       },
       {
         name: 'Git, Linux & Redes',
@@ -1019,7 +1706,12 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Git Essencial: Commit, Branch, Merge, Rebase e Pull Requests',
+          'Terminal Linux, Permissões, Processos e Shell Script',
+          'Modelo OSI/TCP-IP, DNS, HTTP/HTTPS e TLS',
+          'Portas, Firewalls, Proxy Reverso e Balanceamento de Carga',
+        ],
       },
       {
         name: 'Inglês Técnico',
@@ -1027,7 +1719,12 @@ export const STUDY_PRESETS: PresetGoal[] = [
         weight: 3,
         difficulty: 'baixa',
         knowledgeLevel: 'intermediario',
-        topics: [],
+        topics: [
+          'Leitura de Documentação Oficial e RFCs',
+          'Vocabulário de Erros, Logs e Stack Traces',
+          'Escrita de Commits, Issues e Pull Requests em Inglês',
+          'Compreensão de Palestras e Vídeos Técnicos',
+        ],
       },
     ],
     modules: [
@@ -1042,7 +1739,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Arquitetura de Containers vs Máquinas Virtuais',
+              'Dockerfile, Imagens, Camadas e Multi-Stage Builds',
+              'Docker Compose para Ambientes Multi-Serviço',
+              'Redes e Volumes Persistentes no Docker',
+              'Kubernetes: Pods, Deployments, Services e Ingress',
+            ],
           },
           {
             name: 'Cloud Computing & CI/CD',
@@ -1050,7 +1753,12 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Conceitos IaaS, PaaS, SaaS e Regiões/Zonas',
+              'Serviços Core em Cloud (Compute, Storage, IAM, VPC)',
+              'Pipelines de CI/CD (GitHub Actions / Testes Automatizados)',
+              'Infraestrutura como Código (Terraform) e Monitoramento',
+            ],
           },
         ],
       },
@@ -1065,7 +1773,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Estruturas Python, List Comprehensions e Ambientes Virtuais',
+              'NumPy: Vetorização e Operações Matriciais',
+              'Pandas: DataFrames, Limpeza e Agregação de Dados',
+              'Visualização Exploratória (Matplotlib e Seaborn)',
+              'Estatística Aplicada e Análise Exploratória (EDA)',
+            ],
           },
           {
             name: 'Machine Learning & IA Aplicada',
@@ -1073,7 +1787,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Aprendizado Supervisionado vs Não Supervisionado',
+              'Pré-processamento, Split Treino/Teste e Validação Cruzada',
+              'Regressão, Classificação e Métricas (F1, ROC-AUC)',
+              'Árvores de Decisão, Random Forest e Gradient Boosting',
+              'Fundamentos de Redes Neurais, LLMs e Embeddings/RAG',
+            ],
           },
         ],
       },
@@ -1088,7 +1808,13 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'media',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'Fundamentos Mobile: Ciclo de Vida e UI Nativa/Híbrida',
+              'Navegação entre Telas (Stack, Tabs e Deep Linking)',
+              'Consumo de APIs, Cache Offline e Armazenamento Local',
+              'Permissões, Câmera, Notificações Push e Geolocalização',
+              'Build, Assinatura e Publicação nas Lojas (App Store/Play Store)',
+            ],
           },
         ],
       },
@@ -1103,13 +1829,117 @@ export const STUDY_PRESETS: PresetGoal[] = [
             weight: 4,
             difficulty: 'alta',
             knowledgeLevel: 'iniciante',
-            topics: [],
+            topics: [
+              'OWASP Top 10: SQL Injection, XSS, CSRF e Broken Access',
+              'Armazenamento Seguro de Senhas (Hashing, Salt, Argon2)',
+              'Segurança em APIs, CORS, Rate Limiting e Gestão de Segredos',
+              'Criptografia Simétrica/Assimétrica e Certificados TLS',
+              'Análise de Vulnerabilidades e Boas Práticas DevSecOps',
+            ],
           },
         ],
       },
     ],
   },
 ];
+
+function normalizeTopicLookup(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Returns standardized syllabus topics for a given subject name (and optional preset ID:
+ * 'enem', 'medicina', 'concurso_geral', 'oab', 'dev_tech').
+ */
+export function getPresetTopics(subjectName: string, presetId?: string): string[] {
+  const normalizedTarget = normalizeTopicLookup(subjectName);
+
+  if (presetId) {
+    const targetPreset = RAW_STUDY_PRESETS.find((preset) => preset.id === presetId);
+    if (targetPreset) {
+      const presetSubjects = [
+        ...targetPreset.subjects,
+        ...(targetPreset.modules?.flatMap((mod) => mod.subjects) || []),
+      ];
+      const exactMatch = presetSubjects.find((sub) => sub.name === subjectName);
+      if (exactMatch && exactMatch.topics.length > 0) {
+        return [...exactMatch.topics];
+      }
+      if (normalizedTarget) {
+        const normalizedMatch = presetSubjects.find(
+          (sub) => normalizeTopicLookup(sub.name) === normalizedTarget
+        );
+        if (normalizedMatch && normalizedMatch.topics.length > 0) {
+          return [...normalizedMatch.topics];
+        }
+      }
+    }
+  }
+
+  const exactPresetSubject = RAW_STUDY_PRESETS.flatMap((preset) => [
+    ...preset.subjects,
+    ...(preset.modules?.flatMap((mod) => mod.subjects) || []),
+  ]).find((sub) => sub.name === subjectName && sub.topics.length > 0);
+  if (exactPresetSubject) {
+    return [...exactPresetSubject.topics];
+  }
+
+  const fromBank = findSuggestedTopicsForSubject(subjectName);
+  if (fromBank.length > 0) {
+    return [...fromBank];
+  }
+
+  if (normalizedTarget) {
+    for (const preset of RAW_STUDY_PRESETS) {
+      const presetSubjects = [
+        ...preset.subjects,
+        ...(preset.modules?.flatMap((mod) => mod.subjects) || []),
+      ];
+      const match = presetSubjects.find(
+        (sub) => normalizeTopicLookup(sub.name) === normalizedTarget && sub.topics.length > 0
+      );
+      if (match) {
+        return [...match.topics];
+      }
+    }
+  }
+
+  return [];
+}
+
+function ensureNonEmptyPresetTopics(subjectName: string, topics: string[], presetId?: string): string[] {
+  const clean = topics.map((t) => t.trim()).filter(Boolean);
+  if (clean.length > 0) return clean;
+  const standardized = getPresetTopics(subjectName, presetId);
+  if (standardized.length > 0) return standardized;
+  return [
+    `Fundamentos de ${subjectName}`,
+    `Teoria Principal de ${subjectName}`,
+    `Exercícios e Aplicação de ${subjectName}`,
+    `Revisão Geral de ${subjectName}`,
+  ];
+}
+
+export const STUDY_PRESETS: PresetGoal[] = RAW_STUDY_PRESETS.map((preset) => ({
+  ...preset,
+  subjects: preset.subjects.map((sub) => ({
+    ...sub,
+    topics: ensureNonEmptyPresetTopics(sub.name, sub.topics, preset.id),
+  })),
+  modules: preset.modules?.map((mod) => ({
+    ...mod,
+    subjects: mod.subjects.map((sub) => ({
+      ...sub,
+      topics: ensureNonEmptyPresetTopics(sub.name, sub.topics, preset.id),
+    })),
+  })),
+}));
 
 export const INITIAL_ACHIEVEMENTS: Achievement[] = [
   {
@@ -1399,7 +2229,14 @@ export function normalizeAppState(
   };
 
   const todayStr = getTodayStr();
-  const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+  const sessions = pruneSessions(
+    Array.isArray(parsed.sessions) ? parsed.sessions : [],
+    todayStr
+  );
+  const notifications = pruneNotifications(
+    Array.isArray(parsed.notifications) ? parsed.notifications : [],
+    todayStr
+  );
 
   return {
     profile,
@@ -1422,9 +2259,35 @@ export function normalizeAppState(
     lastScheduleGeneratedAt: parsed.lastScheduleGeneratedAt,
     questionLogs: Array.isArray(parsed.questionLogs) ? parsed.questionLogs : [],
     fixedCommitments: Array.isArray(parsed.fixedCommitments) ? parsed.fixedCommitments : [],
-    notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
+    notifications,
     currentUser: userOverride || parsed.currentUser || base.currentUser,
   };
+}
+
+export function pruneSessions(
+  sessions: StudySession[],
+  todayStr: string = getTodayStr()
+): StudySession[] {
+  if (!Array.isArray(sessions) || sessions.length === 0) return [];
+  const cutoffDate = addDays(todayStr, -180);
+  const filtered = sessions.filter((s) => {
+    if (!s || typeof s.date !== 'string') return false;
+    return s.date.slice(0, 10) >= cutoffDate;
+  });
+  return filtered.slice(0, 400);
+}
+
+export function pruneNotifications(
+  notifications: InAppNotification[],
+  todayStr: string = getTodayStr()
+): InAppNotification[] {
+  if (!Array.isArray(notifications) || notifications.length === 0) return [];
+  const cutoffDate = addDays(todayStr, -30);
+  const filtered = notifications.filter((n) => {
+    if (!n || typeof n.date !== 'string') return false;
+    return n.date.slice(0, 10) >= cutoffDate;
+  });
+  return filtered.slice(0, 60);
 }
 
 export function loadStoredState(userId?: string): AppState {
